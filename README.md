@@ -1,10 +1,33 @@
 # AW+ Test Lab
 
-A browser-based training lab for AlliedWare Plus style switch configuration. Open `index.html` in any modern browser: no install, no server, no switch images needed.
+**Practise AlliedWare Plus style switch configuration in your browser.** Three switches, four end devices, real CLI behaviour and live connectivity checks, all in one self-contained `index.html`. No install, no server, no switch images.
+
+**[▶ Open the live lab](https://claude.ai/artifact/6iULQJ7CAKa4VqzqzrBqWJ)** &nbsp;·&nbsp; or download `index.html` and open it in any modern browser.
+
+![AW+ Test Lab: topology, live connectivity checks and the CORE switch console](docs/screenshots/overview.png)
 
 Created by Rikki Keene. © 2026 Rikki Keene.
 
 > Independent training simulator. Not affiliated with or endorsed by Allied Telesis. AlliedWare Plus is a trademark of Allied Telesis, Inc. This project contains no Allied Telesis software.
+
+## Why use it
+
+- **Hands-on from minute one.** Log in as `manager` / `friend` and start typing. Modes, abbreviations, `?` help, Tab completion and `^` error markers behave the way you'd expect on a real switch.
+- **See the network react.** The topology diagram redraws link states as you work (forwarding, blocked by spanning tree, LACP not bundled, down), and six reachability checks update after every command.
+- **Guided, then on your own.** 13 exercises build a full VLAN design step by step; six fault tickets drop you into a broken network to troubleshoot.
+- **Safe to break.** Cause a broadcast storm, lock yourself out with an ACL, erase the config, then reset or restore from a backup.
+
+## Screenshots
+
+| Build a config from factory defaults | Spanning tree and LACP on ACCESS1 |
+|---|---|
+| ![Configuring VLANs and interfaces on CORE with ? help](docs/screenshots/cli-config.png) | ![show spanning-tree brief and show etherchannel summary](docs/screenshots/spanning-tree-lacp.png) |
+| Configure terminal, VLAN database, interfaces and context `?` help. | Root port on the LACP bundle, cross link blocked, both members in sync. |
+
+| Fault ticket: site-wide broadcast storm | End devices: DHCP, ping and trace |
+|---|---|
+| ![Ticket 1044 with a loop detected warning and all checks failing](docs/screenshots/fault-ticket-storm.png) | ![CAM1 gets a DHCP lease, then pings and traces to NVR1](docs/screenshots/host-dhcp-ping.png) |
+| Spanning tree is off on ACCESS2, so the redundant links loop and every check fails. | A camera picks up its address from the CORE DHCP pool and reaches the NVR. |
 
 ## Topology
 
@@ -57,12 +80,21 @@ Progress is kept in the browser's local storage. Use **Export lab** / **Import l
 
 MSTP, per-VLAN spanning tree, DHCP relay, OSPF, AMF, TCP/UDP port matching in ACLs, timers (spanning tree converges instantly).
 
+## Run it locally
+
+Download or clone the repo and open `index.html` in Chrome, Edge, Firefox or Safari. Everything (styles, engine, scenarios) is inline, so it also works offline from a USB stick or a shared drive.
+
 ## Tests
 
 ```
 npm install playwright
 node tests/engine-test.js     # engine and scenario assertions
 node tests/ui-check.js        # quick UI smoke test
+node tests/screenshots.js     # regenerate the README screenshots
 ```
 
-The test loads every scenario and confirms the expected pass/fail pattern for the connectivity checks and exercises, then exercises the CLI parser and takes a screenshot.
+The engine test loads every scenario and confirms the expected pass/fail pattern for the connectivity checks and exercises, then exercises the CLI parser and takes a screenshot.
+
+## Credits
+
+© 2026 Rikki Keene. Independent training simulator, not affiliated with or endorsed by Allied Telesis.
