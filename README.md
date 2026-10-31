@@ -33,26 +33,29 @@ Switch login: `manager` / `friend`
 - Rapid spanning tree (single instance): root election, bridge and port priority, path cost, root / designated / alternate roles, edge ports, `show spanning-tree [brief]`
 - Link aggregation: LACP (`channel-group N mode active|passive`, `poN`) and static (`static-channel-group N`, `saN`), `show etherchannel [summary]`, `show static-channel-group`
 - Loop detection: if spanning tree is disabled or misconfigured, redundant links cause a broadcast storm and traffic in the affected VLANs fails
+- Hardware IP ACLs: `access-list 3000-3699 permit|deny ip|icmp SRC DST` (`A.B.C.D/M`, `host A.B.C.D`, `any`), applied inbound with `access-group`, unmatched traffic permitted; `show access-list`
+- DHCP server: `ip dhcp pool` with `network`, `range`, `default-router`, `dns-server`, `lease`; `service dhcp-server`; `show ip dhcp pool|binding`; `clear ip dhcp binding all`
 - `ping` and `traceroute` computed from the real L2/L3 state of the lab
-- End devices with a simple host shell (`ip`, `show`, `ping`, `trace`)
+- End devices with a simple host shell (`ip`, `dhcp`, `show`, `ping`, `trace`)
 
 ## Coursework
 
-- **Exercises:** 11 guided tasks that build a Data (VLAN 10), CCTV (VLAN 20) and Management (VLAN 99) design, then make CORE the root bridge, bundle the ACCESS1 uplinks with LACP and set edge ports. Each is checked live.
-- **Fault tickets:** pre-broken labs to troubleshoot (CCTV outage, PC offline, unmanageable switch, site-wide broadcast storm, LACP bundle down), plus a completed reference lab.
+- **Exercises:** 13 guided tasks that build a Data (VLAN 10), CCTV (VLAN 20) and Management (VLAN 99) design, then make CORE the root bridge, bundle the ACCESS1 uplinks with LACP, set edge ports, lock the cameras down with an ACL and hand out addresses by DHCP. Each is checked live.
+- **Fault tickets:** pre-broken labs to troubleshoot (CCTV outage, PC offline, unmanageable switch, site-wide broadcast storm, LACP bundle down, camera with no DHCP address), plus a completed reference lab.
 - **Live connectivity:** six reachability checks update after every command.
 
 Progress is kept in the browser's local storage. Use **Export lab** / **Import lab** to move a lab between machines.
 
 ## Not yet simulated
 
-MSTP, per-VLAN spanning tree, ACLs, OSPF, DHCP, AMF, timers (spanning tree converges instantly).
+MSTP, per-VLAN spanning tree, DHCP relay, OSPF, AMF, TCP/UDP port matching in ACLs, timers (spanning tree converges instantly).
 
 ## Tests
 
 ```
 npm install playwright
-node tests/engine-test.js
+node tests/engine-test.js     # engine and scenario assertions
+node tests/ui-check.js        # quick UI smoke test
 ```
 
 The test loads every scenario and confirms the expected pass/fail pattern for the connectivity checks and exercises, then exercises the CLI parser and takes a screenshot.

@@ -4,12 +4,13 @@ const path = require('path');
 const { chromium } = require('playwright');
 
 const EXPECT = {
-  // live connectivity tests (6) and exercise checks (11), 1 = pass
-  factory: { tests: '110000', ex: '00000000000' },
-  solved: { tests: '111111', ex: '11111111111' },
-  cctv: { tests: '100010', ex: '11100011011' },
-  data: { tests: '010101', ex: '11000011011' },
-  mgmt: { tests: '111110', ex: '11111011011' },
+  // live connectivity tests (6) and exercise checks (13), 1 = pass
+  factory: { tests: '110000', ex: '0000000000000' },
+  solved: { tests: '111111', ex: '1111111111111' },
+  cctv: { tests: '100010', ex: '1110001101011' },
+  data: { tests: '010101', ex: '1100001101001' },
+  mgmt: { tests: '111110', ex: '1111101101111' },
+  dhcp: { tests: '101011' },
   storm: { tests: '000000' },
   lacp: { tests: '000001' },
 };
@@ -25,7 +26,7 @@ const EXPECT = {
 
   const r = await p.evaluate(() => {
     const res = {};
-    const tests = () => TESTS.map(t => reach(t.from, t.to) ? 1 : 0).join('');
+    const tests = () => TESTS.map(t => testOk(t) ? 1 : 0).join('');
     const ex = () => EXERCISES.map(e => e.check() ? 1 : 0).join('');
     const run = (id, cmds) => { const s = { buf: [], mode: 'priv', login: 'ok', ifSel: null, pending: null, sink: [] }; for (const c of cmds) { s.sink.push('#' + c); execLine(D[id], s, c); } return s.sink.join('\n'); };
     for (const k of Object.keys(SCENARIOS)) { loadScenario(k); invalidate(); res[k] = { tests: tests(), ex: ex(), storms: buildNet().storms.length }; }
@@ -35,6 +36,13 @@ const EXPECT = {
     // lacp fix: one side active
     loadScenario('lacp'); run('SW1', ['configure terminal', 'interface port1.0.1,port1.0.3', 'channel-group 1 mode active']); invalidate();
     res.lacpFixed = { tests: tests() };
+    // dhcp ticket: fix network, camera gets address but wrong gateway; fix gateway too
+    loadScenario('dhcp');
+    const cam = () => { const s = S.CAM1; s.sink = []; hostCmd('CAM1', 'dhcp'); const o = s.sink.join(' '); delete s.sink; return o; };
+    res.dhcp0 = cam();
+    run('SW1', ['configure terminal', 'ip dhcp pool CCTV', 'network 192.168.20.0/24']); res.dhcp1 = cam(); res.dhcp1t = tests();
+    run('SW1', ['configure terminal', 'ip dhcp pool CCTV', 'default-router 192.168.20.1']); res.dhcp2 = cam(); res.dhcpFixed = { tests: tests() };
+    res.dhcpShow = run('SW1', ['show ip dhcp binding', 'show ip dhcp pool']) + '\n' + run('SW2', ['show access-list', 'show running-config interface port1.0.2']);
     // static LAG mismatch should loop if STP is off
     loadScenario('factory'); invalidate(); res.factoryStp = run('SW2', ['show spanning-tree brief']);
     loadScenario('solved');
@@ -52,9 +60,9 @@ const EXPECT = {
     console.log(`${ok ? 'PASS' : 'FAIL'} ${k}.${f} = ${r[k][f]} (expected ${EXPECT[k][f]})`);
   }
   const extra = [['storm has a loop', r.storm.storms > 0], ['storm fixed', r.stormFixed.tests === '111111' && r.stormFixed.storms === 0 && r.stormFixed.cross === 'blocked'],
-    ['lacp fixed', r.lacpFixed.tests === '111111'], ['solved has no loop', r.solved.storms === 0], ['factory has no loop', r.factory.storms === 0]];
+    ['lacp fixed', r.lacpFixed.tests === '111111'], ['dhcp fixed', r.dhcpFixed.tests === '111111'], ['solved has no loop', r.solved.storms === 0], ['factory has no loop', r.factory.storms === 0]];
   for (const [n, ok] of extra) { if (!ok) fail++; console.log(`${ok ? 'PASS' : 'FAIL'} ${n}`); }
-  if (process.argv.includes('-v')) { console.log(r.factoryStp); console.log(r.show); console.log(r.acc); console.log(r.help); console.log(JSON.stringify(r.stormFixed)); }
+  if (process.argv.includes('-v')) { console.log(r.factoryStp); console.log(r.show); console.log(r.acc); console.log(r.help); console.log(JSON.stringify(r.stormFixed)); console.log(r.dhcp0, '|', r.dhcp1, r.dhcp1t, '|', r.dhcp2); console.log(r.dhcpShow); }
 
   // UI smoke test: log in, run a ping, open help
   await p.evaluate(() => { localStorage.clear(); loadScenario('storm'); active = 'SW1'; refresh(); });
