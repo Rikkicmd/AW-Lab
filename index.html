@@ -80,7 +80,7 @@ details pre{margin:6px 0 0;padding:8px;background:var(--term);border:1px solid v
 .ref h3{font:600 13px/1.2 var(--body);margin:6px 0 4px}
 .ref table{border-collapse:collapse;width:100%;font-size:12.5px}
 .ref td{padding:3px 4px;border-bottom:1px solid var(--line);vertical-align:top}
-.ref td:first-child{font-family:var(--mono);white-space:nowrap;color:#cfe3f5;font-size:12px}
+.ref td:first-child{font-family:var(--mono);width:58%;overflow-wrap:anywhere;color:#cfe3f5;font-size:12px}
 .ref td:last-child{color:var(--muted)}
 
 .console{display:flex;flex-direction:column;min-height:0;min-width:0}
@@ -225,17 +225,22 @@ const portNames=def=>Array.from({length:def.nports},(_,i)=>`port1.0.${i+1}`);
 function factoryCfg(def){
   if(def.kind==='host')return {ip:def.ip,len:def.len,gw:def.gw};
   const ports={};for(const p of portNames(def))ports[p]=newPort();
-  return {hostname:'awplus',ports,aggs:{},vlans:{1:{name:'default',state:'enable'}},vifs:{1:{ip:null,len:null,admin:true,desc:''}},routes:[],lldp:false,stp:{enabled:true,mode:'rstp',priority:32768},acls:{},dhcp:{service:false,pools:{}}};
+  return {hostname:'awplus',ports,aggs:{},vlans:{1:{name:'default',state:'enable'}},vifs:{1:{ip:null,len:null,admin:true,desc:''}},routes:[],lldp:false,stp:{enabled:true,mode:'rstp',priority:32768},acls:{},dhcp:{service:false,pools:{}},...extraDefaults()};
 }
-function newPort(){return {admin:true,desc:'',mode:'access',access:1,allowed:{type:'list',list:[]},native:1,agg:null,lacp:null,acl:null,stp:{edge:false,cost:null,prio:128}};}
+function pwHash(pw){let a=0x811c9dc5,b=0x01000193;for(const ch of String(pw)){a=Math.imul(a^ch.charCodeAt(0),16777619)>>>0;b=Math.imul(b^ch.charCodeAt(0),2246822519)>>>0;}
+  return '$1$'+a.toString(36).padStart(7,'0')+'$'+b.toString(36).padStart(7,'0')+(a^b).toString(36).padStart(7,'0');}
+function extraDefaults(){return {users:{manager:{priv:15,hash:pwHash('friend')}},banner:null,tz:null,ssh:false,telnet:true,
+  snmp:{enabled:false,communities:{},location:'',contact:''},ntp:{servers:[],master:null},dns:{servers:[],domain:null},lines:{con:null,vty:null}};}
+function newPort(){return {speed:'auto',duplex:'auto',admin:true,desc:'',mode:'access',access:1,allowed:{type:'list',list:[]},native:1,agg:null,lacp:null,acl:null,stp:{edge:false,cost:null,prio:128}};}
 function normalizeCfg(def,cfg){ // upgrade labs saved by v1
   if(def.kind!=='switch')return cfg;
+  for(const [k,v] of Object.entries(extraDefaults()))if(cfg[k]===undefined)cfg[k]=v;
   cfg.aggs=cfg.aggs||{};cfg.acls=cfg.acls||{};cfg.dhcp=cfg.dhcp||{service:false,pools:{}};cfg.stp=cfg.stp||{enabled:true,mode:'rstp',priority:32768};
   for(const n of portNames(def)){const p=cfg.ports[n]=Object.assign(newPort(),cfg.ports[n]||{});p.stp=Object.assign({edge:false,cost:null,prio:128},p.stp||{});}
   for(const a of Object.values(cfg.aggs)){a.stp=Object.assign({edge:false,cost:null,prio:128},a.stp||{});if(a.acl===undefined)a.acl=null;}
   return cfg;
 }
-for(const def of DEFS)D[def.id]={def,cfg:factoryCfg(def),startup:null,boot:Date.now(),leases:{}};
+for(const def of DEFS)D[def.id]={def,cfg:factoryCfg(def),startup:null,boot:Date.now(),leases:{},files:{},log:[],clockOff:0};
 
 /* ================= L2 / L3 engine ================= */
 const CACHE={};
@@ -253,7 +258,10 @@ function taggedVlans(cfg,p){if(p.mode!=='trunk')return [];return Object.keys(cfg
 const carries=(cfg,p,v)=>untaggedVlan(cfg,p)===v||taggedVlans(cfg,p).includes(v);
 function linkAt(id,port){for(const l of LINKS){if(l.a[0]===id&&l.a[1]===port)return {link:l,peer:l.b};if(l.b[0]===id&&l.b[1]===port)return {link:l,peer:l.a};}return null;}
 function adminUp(id,port){const d=D[id];if(d.def.kind==='host')return true;const p=d.cfg.ports[port];if(!p.admin)return false;if(p.agg&&d.cfg.aggs[p.agg]&&!d.cfg.aggs[p.agg].admin)return false;return true;}
-const physUp=l=>adminUp(l.a[0],l.a[1])&&adminUp(l.b[0],l.b[1]);
+const spd=(id,pn)=>D[id].def.kind==='host'?'auto':D[id].cfg.ports[pn].speed;
+const speedOk=l=>{const a=spd(l.a[0],l.a[1]),b=spd(l.b[0],l.b[1]);return a==='auto'||b==='auto'||a===b;};
+const physUp=l=>adminUp(l.a[0],l.a[1])&&adminUp(l.b[0],l.b[1])&&speedOk(l);
+function linkSpeed(id,pn){const x=linkAt(id,pn);const a=spd(id,pn);if(!x)return a==='auto'?1000:+a;const b=spd(x.peer[0],x.peer[1]);return a!=='auto'?+a:(b!=='auto'?+b:1000);}
 const linkUp=physUp;
 function lacpOf(id,pn){const d=D[id];if(d.def.kind!=='switch')return null;const p=d.cfg.ports[pn];return p.agg&&p.agg.startsWith('po')&&d.cfg.aggs[p.agg]?p.lacp:null;}
 function lacpOk(l){const a=lacpOf(l.a[0],l.a[1]),b=lacpOf(l.b[0],l.b[1]);if(!a&&!b)return true;if(!a||!b)return false;return a==='active'||b==='active';}
@@ -380,12 +388,13 @@ function swLines(p){
   return L;
 }
 function stpLines(o){const L=[];if(o.stp.edge)L.push(' spanning-tree edgeport');if(o.stp.cost)L.push(' spanning-tree path-cost '+o.stp.cost);if(o.stp.prio!==128)L.push(' spanning-tree priority '+o.stp.prio);return L;}
-const portKey=p=>JSON.stringify([p.mode,p.access,p.allowed,p.native,p.desc,p.admin,p.agg,p.lacp,p.stp,p.acl]);
+const portKey=p=>JSON.stringify([p.mode,p.access,p.allowed,p.native,p.desc,p.admin,p.agg,p.lacp,p.stp,p.acl,p.speed,p.duplex]);
 const aclAddr=a=>a.len===0?'any':a.len===32?'host '+a.net:a.net+'/'+a.len;
 function portLines(p,cfg){
   const L=[];if(p.desc)L.push(' description '+p.desc);
   const e=p.agg&&cfg.aggs[p.agg]?cfg.aggs[p.agg]:p;L.push(...swLines(e));if(e===p){L.push(...stpLines(p));if(p.acl)L.push(' access-group '+p.acl);}
   if(e!==p){const n=p.agg.slice(2);L.push(p.agg.startsWith('po')?` channel-group ${n} mode ${p.lacp}`:` static-channel-group ${n}`);}
+  if(p.speed!=='auto')L.push(' speed '+p.speed);if(p.duplex!=='auto')L.push(' duplex '+p.duplex);
   if(!p.admin)L.push(' shutdown');return L;
 }
 function aggLines(a){const L=[];if(a.desc)L.push(' description '+a.desc);L.push(...swLines(a),...stpLines(a));if(a.acl)L.push(' access-group '+a.acl);if(!a.admin)L.push(' shutdown');return L;}
@@ -393,7 +402,12 @@ function vifLines(x){const L=[];if(x.desc)L.push(' description '+x.desc);if(x.ip
 function configText(def,cfg,only){
   const L=[];
   if(!only){
-    L.push('!','service password-encryption','!',`hostname ${cfg.hostname}`,'!','no banner motd','!','username manager privilege 15 password 8 $1$bJoVec4D$JwOJGPr7YqoExA0GVasdE0','!');
+    L.push('!','service password-encryption','!',`hostname ${cfg.hostname}`,'!',cfg.banner?'banner motd '+cfg.banner:'no banner motd','!');
+    for(const u of Object.keys(cfg.users).sort())L.push(`username ${u} privilege ${cfg.users[u].priv} password 8 ${cfg.users[u].hash}`);L.push('!');
+    const sv=[];if(cfg.ssh)sv.push('service ssh');if(!cfg.telnet)sv.push('no service telnet');if(sv.length)L.push(...sv,'!');
+    if(cfg.dns.domain||cfg.dns.servers.length){if(cfg.dns.domain)L.push('ip domain-name '+cfg.dns.domain);for(const n of cfg.dns.servers)L.push('ip name-server '+n);L.push('!');}
+    const sn=cfg.snmp,snl=[];if(sn.enabled)snl.push('snmp-server');for(const k of Object.keys(sn.communities).sort())snl.push(`snmp-server community ${k} ${sn.communities[k]}`);
+    if(sn.location)snl.push('snmp-server location '+sn.location);if(sn.contact)snl.push('snmp-server contact '+sn.contact);if(snl.length)L.push(...snl,'!');
     const sl=[];if(!cfg.stp.enabled)sl.push('no spanning-tree enable');if(cfg.stp.mode!=='rstp')sl.push('spanning-tree mode '+cfg.stp.mode);if(cfg.stp.priority!==32768)sl.push('spanning-tree priority '+cfg.stp.priority);
     if(sl.length)L.push(...sl,'!');
     if(cfg.lldp)L.push('lldp run','!');
@@ -416,7 +430,9 @@ function configText(def,cfg,only){
   const vv=Object.keys(cfg.vifs).map(Number).sort((a,b)=>a-b);
   for(const v of vv){if(only&&(only.type!=='vlan'||!only.list.includes(v)))continue;const ls=vifLines(cfg.vifs[v]);if(!only&&v===1&&!ls.length)continue;L.push('interface vlan'+v,...ls,'!');}
   if(!only){if(cfg.routes.length){for(const r of cfg.routes)L.push(`ip route ${r.net}/${r.len} ${r.nh}`);L.push('!');}
-    L.push('line con 0','line vty 0 4','!','end');}
+    const nl=[];for(const n of cfg.ntp.servers)nl.push('ntp server '+n);if(cfg.ntp.master!==null)nl.push('ntp master '+cfg.ntp.master);if(nl.length)L.push(...nl,'!');
+    if(cfg.tz)L.push(`clock timezone ${cfg.tz.name} ${cfg.tz.dir} ${cfg.tz.h}`,'!');
+    L.push('line con 0');if(cfg.lines.con)L.push(' exec-timeout '+cfg.lines.con.join(' '));L.push('line vty 0 4');if(cfg.lines.vty)L.push(' exec-timeout '+cfg.lines.vty.join(' '));L.push('!','end');}
   return L.join('\n');
 }
 const bootCfg=d=>d.startup||factoryCfg(d.def);
@@ -450,6 +466,17 @@ const PARAMS={
   DAYS:{label:'<0-365>',desc:'Days',test:w=>/^\d+$/.test(w)&&+w<=365?+w:undefined},
   HOURS:{label:'<0-23>',desc:'Hours',test:w=>/^\d+$/.test(w)&&+w<=23?+w:undefined},
   MINS:{label:'<0-59>',desc:'Minutes',test:w=>/^\d+$/.test(w)&&+w<=59?+w:undefined},
+  REP:{label:'<1-100>',desc:'Number of echo requests',test:w=>/^\d+$/.test(w)&&+w>=1&&+w<=100?+w:undefined},
+  FILE:{label:'FILENAME.cfg',desc:'Configuration file in flash, e.g. backup.cfg',test:w=>{const m=/^(?:flash:\/?)?([A-Za-z0-9_.-]+\.cfg)$/i.exec(w);return m?m[1]:undefined;}},
+  PRIVL:{label:'<1-15>',desc:'Privilege level (15 can use enable)',test:w=>/^\d+$/.test(w)&&+w>=1&&+w<=15?+w:undefined},
+  TIME:{label:'HH:MM:SS',desc:'Time of day',test:w=>/^([01]?\d|2[0-3]):[0-5]\d:[0-5]\d$/.test(w)?w:undefined},
+  DAYN:{label:'<1-31>',desc:'Day of the month',test:w=>/^\d+$/.test(w)&&+w>=1&&+w<=31?+w:undefined},
+  MON:{label:'MONTH',desc:'Month, e.g. Jan',test:w=>{const i=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'].indexOf(w.slice(0,3).toLowerCase());return i<0?undefined:i;}},
+  YEAR:{label:'<2000-2035>',desc:'Year',test:w=>/^\d{4}$/.test(w)&&+w>=2000&&+w<=2035?+w:undefined},
+  TZH:{label:'<0-12>',desc:'Hours from UTC',test:w=>/^\d+$/.test(w)&&+w<=12?+w:undefined},
+  STRAT:{label:'<1-15>',desc:'Stratum',test:w=>/^\d+$/.test(w)&&+w>=1&&+w<=15?+w:undefined},
+  TMIN:{label:'<0-35791>',desc:'Timeout in minutes (0 = never)',test:w=>/^\d+$/.test(w)&&+w<=35791?+w:undefined},
+  TSEC:{label:'<0-2147483>',desc:'Timeout in seconds',test:w=>/^\d+$/.test(w)&&+w<=2147483?+w:undefined},
   NUM:{label:'<0-512>',desc:'Number of lines on screen (0 for no pausing)',test:w=>/^\d+$/.test(w)&&+w<=512?+w:undefined},
 };
 const HELP={
@@ -489,12 +516,24 @@ const HELP={
   'access-list ip':'Any IP packet','ip dhcp':'DHCP server configuration','dhcp pool':'Create or edit a DHCP address pool','show ip dhcp':'DHCP server information',
   'dhcp binding':'Addresses leased to clients','dhcp pool':'DHCP pools','service':'Enable a network service','dhcp-server':'DHCP server',
   network:'Network served by this pool',range:'Range of addresses to lease','default-router':'Default gateway given to clients (option 3)',
-  'dns-server':'DNS server given to clients (option 6)',lease:'Lease time (days hours minutes)',host:'A single host address',any:'Any address',clear:'Reset functions','show interface switchport':'Show VLAN membership information',
+  'dns-server':'DNS server given to clients (option 6)',lease:'Lease time (days hours minutes)',host:'A single host address',any:'Any address',clear:'Reset functions',
+  repeat:'Number of packets to send',dir:'List files in flash',file:'Show the contents of a file','show file':'Show the contents of a file',delete:'Delete a file',boot:'Boot configuration',
+  'show boot':'Boot image and configuration settings',username:'Add or change a user account',privilege:'Privilege level',password:'Password (8 = already encrypted)',
+  banner:'Login banner',motd:'Message of the day shown at login',clock:'Manage the system clock',set:'Set the time and date',timezone:'Set the time zone',
+  plus:'Ahead of UTC',minus:'Behind UTC',ntp:'Network Time Protocol','ntp server':'Use an NTP server','ntp master':'Act as an NTP server for other devices',
+  'show ntp':'NTP information',associations:'NTP peers and their state',status:'Synchronisation status','snmp-server':'SNMP agent',community:'SNMP community string',
+  ro:'Read only',rw:'Read and write',location:'System location',contact:'System contact','name-server':'DNS server','domain-name':'Default DNS domain',
+  ssh:'Secure Shell','service ssh':'SSH server','service telnet':'Telnet server',telnet:'Open a Telnet session to another device',
+  'ssh user':'Log in as a different user',users:'Users logged in to this device',history:'Command history',arp:'ARP table','clear arp-cache':'Clear ARP entries',
+  'interface status':'Port status, VLAN, speed and duplex',log:'Buffered system log','show log':'Buffered system log',tail:'Most recent log entries',cpu:'CPU utilisation',memory:'Memory utilisation',
+  environment:'Fans, power supplies and temperature',detail:'Detailed information',speed:'Set the port speed',duplex:'Set the port duplex',half:'Half duplex',full:'Full duplex',auto:'Autonegotiate',
+  line:'Configure a terminal line',con:'Console line',vty:'Remote login lines','exec-timeout':'Log out idle sessions after this time',
+  'show ip name-server':'DNS servers','show ssh':'SSH information','ssh server':'SSH server settings','show telnet':'Telnet server settings','show interface switchport':'Show VLAN membership information',
 };
 function kwHelp(tokens,i){const path=tokens.slice(0,i+1).map(t=>t.kw||'*').join(' ');const two=i>0&&tokens[i-1].kw?tokens[i-1].kw+' '+tokens[i].kw:null;return HELP[path]||(two&&HELP[two])||HELP[tokens[i].kw]||'';}
 const CMDS=[];
 function def(modes,spec,fn){const tokens=spec.split(' ').map(t=>{const m=/^<(\w+)(?::(\w+))?>$/.exec(t);return m?{p:m[1],name:m[2]||m[1]}:{kw:t};});for(const s of String(modes).split(','))if(!s)throw new Error(spec);CMDS.push({modes:modes.split(','),tokens,fn,spec});}
-const CFGMODES=['config','vlandb','if-port','if-vlan','dhcp'];
+const CFGMODES=['config','vlandb','if-port','if-vlan','dhcp','line'];
 function matchWords(d,mode,words){
   let st=CMDS.filter(c=>c.modes.includes(mode)).map(c=>({c,args:{},done:false}));
   for(let i=0;i<words.length;i++){
@@ -519,8 +558,17 @@ function matchWords(d,mode,words){
 const S={};
 const MAXBUF=4000;
 function out(s,text){if(s.sink){s.sink.push(...String(text).split('\n'));return;}s.buf.push(...String(text).split('\n'));if(s.buf.length>MAXBUF)s.buf.splice(0,s.buf.length-MAXBUF);}
-const SUFFIX={user:'>',priv:'#',config:'(config)#','if-port':'(config-if)#','if-vlan':'(config-if)#',vlandb:'(config-vlan)#',dhcp:'(dhcp-config)#'};
-function promptOf(id){const d=D[id],s=S[id];if(s.pending)return s.pending.prompt;if(d.def.kind==='host')return id+'> ';if(s.login==='user')return d.cfg.hostname+' login: ';if(s.login==='pass')return 'Password: ';return d.cfg.hostname+SUFFIX[s.mode];}
+const SUFFIX={user:'>',priv:'#',config:'(config)#','if-port':'(config-if)#','if-vlan':'(config-if)#',vlandb:'(config-vlan)#',dhcp:'(dhcp-config)#',line:'(config-line)#'};
+function promptFor(d,s){if(s.pending)return s.pending.prompt;if(d.def.kind==='host')return d.def.id+'> ';if(s.login==='user')return d.cfg.hostname+' login: ';if(s.login==='pass')return 'Password: ';return d.cfg.hostname+SUFFIX[s.mode];}
+function promptOf(id){const s=S[id];if(s.remote)return promptFor(D[s.remote.id],s.remote.sess);return promptFor(D[id],s);}
+function effOf(id){const s=S[id];return s.remote?{d:D[s.remote.id],s:s.remote.sess}:{d:D[id],s};}
+const fmtLocal=(d,t)=>{const x=new Date(t);const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];const z=n=>String(n).padStart(2,'0');
+  return `${x.getUTCFullYear()} ${M[x.getUTCMonth()]} ${z(x.getUTCDate())} ${z(x.getUTCHours())}:${z(x.getUTCMinutes())}:${z(x.getUTCSeconds())}`;};
+const tzOff=d=>d.cfg.tz?(d.cfg.tz.dir==='minus'?-1:1)*d.cfg.tz.h*3600000:0;
+const devNow=d=>Date.now()+(d.clockOff||0);
+function logEv(d,fac,msg){if(!d.log)d.log=[];d.log.push(`${fmtLocal(d,devNow(d)+tzOff(d))} ${fac} ${d.cfg.hostname} ${msg}`);if(d.log.length>500)d.log.shift();}
+function seedLog(d){d.log=[];logEv(d,'syslog.notice','syslog-ng[812]: syslog-ng starting up; version=3.38');logEv(d,'kern.notice','kernel: Linux version 5.10 (simulated AW+ 5.5.3)');
+  logEv(d,'user.notice',`IMI[1036]: ${d.startup?'Loaded configuration flash:/default.cfg':'No startup configuration, using factory defaults'}`);logEv(d,'user.notice','HSL[1012]: HSL: Switch is ready');}
 function bootLines(d){
   const fam=d.def.model.split('-')[0];
   return ['Bootloader 7.0.24 loaded','Press <Ctrl+B> for the Boot Menu','','Reading filesystem...',`Loading flash:${fam}-5.5.3-sim.rel...`,'Verifying release... OK','Booting...',
@@ -537,19 +585,19 @@ function swTargets(c){const cfg=c.d.cfg;const mem=c.s.ifSel.list.find(n=>!isAggN
   if(mem){const a=cfg.ports[mem].agg;out(c.s,`% ${mem} is a member of ${a}. Configure interface ${a} instead.`);return null;}return portsOf(c);}
 function needVlans(c,list){const miss=list.filter(v=>!c.d.cfg.vlans[v]);if(miss.length){out(c.s,`% VLAN ${fmtVlans(miss)} does not exist`);return false;}return true;}
 function needTrunk(c,T){const i=T.findIndex(p=>p.mode!=='trunk');if(i>=0){out(c.s,`% ${c.s.ifSel.list[i]} is not in trunk mode`);return false;}return true;}
-function logout(c){c.s.login='user';c.s.mode='user';c.s.ifSel=null;out(c.s,'');}
+function logout(c){if(c.s.isRemote){c.s.closed=true;return;}c.s.login='user';c.s.mode='user';c.s.ifSel=null;out(c.s,'');}
 
-async function cmdPing(c){
+async function cmdPing(c){const N=c.a.n||5;
   const {d,s}=c,dst=c.a.dst,r=pingCalc(d.def.id,dst),fast=!!s.sink;
   if(r.fail==='noroute'){out(s,'connect: Network is unreachable');return;}
   out(s,`PING ${dst} (${dst}) 56(84) bytes of data.`);const times=[];
-  for(let i=1;i<=5;i++){if(!fast)await sleep(i===1?150:420);
+  for(let i=1;i<=N;i++){if(!fast)await sleep(i===1?150:420);
     if(r.ok){const t=rtt(r.hops.length);times.push(+t);out(s,`64 bytes from ${dst}: icmp_seq=${i} ttl=${r.ttl} time=${t} ms`);}
     else if(r.fail==='arp'&&r.hops.length===0)out(s,`From ${r.src} icmp_seq=${i} Destination Host Unreachable`);
     if(!fast)render();}
   out(s,'');out(s,`--- ${dst} ping statistics ---`);
-  if(r.ok){out(s,`5 packets transmitted, 5 received, 0% packet loss, time 4005ms`);const mn=Math.min(...times),mx=Math.max(...times),av=times.reduce((a,b)=>a+b,0)/5;out(s,`rtt min/avg/max/mdev = ${mn.toFixed(3)}/${av.toFixed(3)}/${mx.toFixed(3)}/${((mx-mn)/2).toFixed(3)} ms`);}
-  else out(s,`5 packets transmitted, 0 received${r.fail==='arp'&&r.hops.length===0?', +5 errors':''}, 100% packet loss, time 4005ms`);
+  if(r.ok){out(s,`${N} packets transmitted, ${N} received, 0% packet loss, time ${(N-1)*1001}ms`);const mn=Math.min(...times),mx=Math.max(...times),av=times.reduce((a,b)=>a+b,0)/N;out(s,`rtt min/avg/max/mdev = ${mn.toFixed(3)}/${av.toFixed(3)}/${mx.toFixed(3)}/${((mx-mn)/2).toFixed(3)} ms`);}
+  else out(s,`${N} packets transmitted, 0 received${r.fail==='arp'&&r.hops.length===0?`, +${N} errors`:''}, 100% packet loss, time ${(N-1)*1001}ms`);
 }
 async function cmdTrace(c){
   const {d,s}=c,dst=c.a.dst,id=d.def.id;const r=lookup(id,dst);
@@ -599,28 +647,30 @@ function ifDetail(c,name){
 function allIfNames(d){return [...portNames(d.def),...Object.keys(d.cfg.aggs).sort(),...Object.keys(d.cfg.vifs).map(Number).sort((a,b)=>a-b).map(v=>'vlan'+v)];}
 function rebootDev(id){
   const d=D[id],s=S[id];
+  for(const x in S)if(S[x].remote&&S[x].remote.id===id){out(S[x],'');out(S[x],'Connection closed by foreign host.');S[x].remote=null;}
   return (async()=>{out(s,'');out(s,'Rebooting at user request...');render();await sleep(900);
-    d.cfg=clone(bootCfg(d));d.boot=Date.now();d.leases={};invalidate();s.buf.push('');s.mode='user';s.ifSel=null;
+    d.cfg=clone(bootCfg(d));d.boot=Date.now();d.leases={};invalidate();seedLog(d);s.buf.push('');s.mode='user';s.ifSel=null;
     for(const l of bootLines(d)){out(s,l);render();await sleep(110);}s.login='user';})();
 }
 
 /* ---- user / privileged exec ---- */
 const U='user,priv';
-def('user','enable',c=>{c.s.mode='priv';});
+def('user','enable',c=>{if(c.s.priv!==undefined&&c.s.priv<15){out(c.s,`% Insufficient privilege: user ${c.s.user} has privilege level ${c.s.priv}. Level 15 is needed.`);return;}c.s.mode='priv';});
 def('priv','disable',c=>{c.s.mode='user';});
 def(U,'exit',logout);def(U,'logout',logout);
-def(U,'ping <IP:dst>',cmdPing);
+def(U,'ping <IP:dst>',cmdPing);def(U,'ping <IP:dst> repeat <REP:n>',cmdPing);
 def(U,'traceroute <IP:dst>',cmdTrace);
 def(U,'terminal length <NUM:n>',()=>{});
 def(U,'show version',c=>{const fam=c.d.def.model.split('-')[0];out(c.s,[`AlliedWare Plus (TM) 5.5.3 (simulated training image)`,'',`Build name : ${fam}-5.5.3-sim.rel`,'Build date : Sat Oct 31 2026','Build type : RELEASE',`Platform   : ${c.d.def.model}`,'',
   'This is a browser simulation for training. It contains no Allied Telesis software.'].join('\n'));});
-def(U,'show clock',c=>{const t=new Date().toUTCString().replace(' GMT','');out(c.s,`Local Time: ${t}\nUTC Time:   ${t}\nTimezone: UTC\nTimezone Offset: +00:00\nSummer time zone: None`);});
+def(U,'show clock',c=>{const d=c.d,u=devNow(d),z=d.cfg.tz;const f=t=>new Date(t).toUTCString().replace(' GMT','');
+  out(c.s,`Local Time: ${f(u+tzOff(d))}\nUTC Time:   ${f(u)}\nTimezone: ${z?z.name:'UTC'}\nTimezone Offset: ${z?(z.dir==='minus'?'-':'+')+String(z.h).padStart(2,'0'):'+00'}:00\nSummer time zone: None`);});
 def(U,'show system',c=>{const d=c.d,fam=d.def.model.split('-')[0];out(c.s,[`Switch System Status                                   ${new Date().toUTCString().replace(' GMT','')}`,'',
   'Board       ID  Bay   Board Name                         Rev   Serial number','--------------------------------------------------------------------------------',
   `Base       ${fam==='x530'?'463':'412'}        ${d.def.model.padEnd(35)}A-0   SIM${d.def.id}0000${d.def.nports}`,'--------------------------------------------------------------------------------',
   'RAM:  Total: 2045512 kB Free: 1588204 kB','Flash: 1.0GB Used: 61.4MB Available: 938.6MB','--------------------------------------------------------------------------------',
   'Environment Status : Normal',`Uptime             : ${fmtUptime(Date.now()-d.boot)}`,'Bootloader version : 7.0.24','',`Current software   : ${fam}-5.5.3-sim.rel`,'Software version   : 5.5.3-sim','Build date         : Sat Oct 31 2026','',
-  `Current boot config: flash:/default.cfg (${d.startup?'file exists':'file does not exist'})`,'','System Name',` ${d.cfg.hostname}`,'System Contact','','System Location',''].join('\n'));});
+  `Current boot config: flash:/default.cfg (${d.startup?'file exists':'file does not exist'})`,'','System Name',` ${d.cfg.hostname}`,'System Contact',` ${d.cfg.snmp.contact}`,'System Location',` ${d.cfg.snmp.location}`].join('\n'));});
 def(U,'show interface brief',c=>{const d=c.d,L=['Interface             Status          Protocol'];
   for(const n of portNames(d.def))L.push(n.padEnd(22)+(d.cfg.ports[n].admin?'admin up':'admin down').padEnd(16)+(portRunning(d.def.id,n)?'running':'down'));
   for(const a of Object.keys(d.cfg.aggs).sort())L.push(a.padEnd(22)+(d.cfg.aggs[a].admin?'admin up':'admin down').padEnd(16)+(activeMembers(d.def.id,a).length?'running':'down'));
@@ -650,7 +700,7 @@ def(U,'show lldp neighbors',c=>{const d=c.d,L=['Capability codes: R - Repeater, 
   let n=0;for(const pn of portNames(d.def)){const x=linkAt(d.def.id,pn);if(!x||!linkUp(x.link))continue;const pd=D[x.peer[0]];if(pd.def.kind!=='switch'||!pd.cfg.lldp)continue;n++;
     const rtr=Object.values(pd.cfg.vifs).some(v=>v.ip);L.push(pn.padEnd(12)+pd.def.mac.padEnd(16)+x.peer[1].padEnd(21)+pd.cfg.hostname.slice(0,25).padEnd(26)+(rtr?'Br':'B'));}
   L.push('',`Number of neighbors: ${n}`);out(c.s,L.join('\n'));});
-def(U,'show mac address-table',c=>{const d=c.d,id=d.def.id,net=buildNet(),rows=[];
+function macRows(id){const d=D[id],net=buildNet(),rows=[];
   for(const v of Object.keys(d.cfg.vlans).map(Number).filter(v=>vlanActive(d.cfg,v)).sort((a,b)=>a-b)){
     const seen=new Set([`${id}|${v}`]),q=(net.adj.get(`${id}|${v}`)||[]).map(e=>({node:e.to,port:e.port}));
     while(q.length){const n=q.shift();if(seen.has(n.node))continue;seen.add(n.node);const [nid,nv]=n.node.split('|');if(nid===id)continue;
@@ -658,7 +708,15 @@ def(U,'show mac address-table',c=>{const d=c.d,id=d.def.id,net=buildNet(),rows=[
       if(mac&&!rows.some(r=>r[0]===v&&r[2]===mac))rows.push([v,logName(id,n.port),mac,'dynamic']);
       for(const e of net.adj.get(n.node)||[])q.push({node:e.to,port:n.port});}
     if(vifUp(id,v))rows.push([v,'CPU',d.def.mac,'static']);}
-  const L=['VLAN port             mac            fwd'];for(const r of rows)L.push(String(r[0]).padEnd(5)+r[1].padEnd(17)+r[2].padEnd(15)+'forward   '+r[3]);out(c.s,L.join('\n'));});
+  return rows;}
+def(U,'show mac address-table',c=>{const L=['VLAN port             mac            fwd'];for(const r of macRows(c.d.def.id))L.push(String(r[0]).padEnd(5)+r[1].padEnd(17)+r[2].padEnd(15)+'forward   '+r[3]);out(c.s,L.join('\n'));});
+def('priv','clear mac address-table dynamic',c=>{out(c.s,'% Dynamic entries cleared. They are relearned as soon as traffic flows.');});
+def(U,'show arp',c=>{const d=c.d,id=d.def.id,net=buildNet(),macs=macRows(id),L=['IP Address      MAC Address     Interface       Port          Type'];
+  for(const v of Object.keys(d.cfg.vifs).map(Number).sort((a,b)=>a-b)){const x=d.cfg.vifs[v];if(!x.ip||!vifUp(id,v))continue;
+    for(const e of endpoints()){if(e.id===id||!inNet(e.ip,netOf(x.ip,x.len),x.len)||!net.same(e.node,`${id}|${v}`))continue;const mac=D[e.id].def.mac;
+      const r=macs.find(m=>m[0]===v&&m[2]===mac);L.push(e.ip.padEnd(16)+mac.padEnd(16)+('vlan'+v).padEnd(16)+(r?r[1]:'-').padEnd(14)+'dynamic');}}
+  out(c.s,L.join('\n'));});
+def('priv','clear arp-cache',()=>{});
 const roleName=r=>({root:'Rootport',designated:'Designated',alternate:'Alternate',disabled:'Disabled'}[r]);
 const stateName=x=>x.fwd?'Forwarding':(x.role==='disabled'?'Disabled':'Discarding');
 function stpShow(c,brief){const d=c.d,id=d.def.id,cfg=d.cfg;
@@ -715,7 +773,7 @@ def('config','no ip route <PREFIX:pfx> <IP:nh>',c=>{const [ip,l]=c.a.pfx.split('
 def('config','lldp run',c=>{c.d.cfg.lldp=true;});def('config','no lldp run',c=>{c.d.cfg.lldp=false;});
 def('config','exit',c=>{c.s.mode='priv';});
 def(ALL,'end',c=>{c.s.mode='priv';c.s.ifSel=null;});
-def('vlandb,if-port,if-vlan,dhcp','exit',c=>{c.s.mode='config';c.s.ifSel=null;});
+def('vlandb,if-port,if-vlan,dhcp,line','exit',c=>{c.s.mode='config';c.s.ifSel=null;});
 
 /* ---- VLAN database ---- */
 const mkVlan=(cfg,v)=>{if(!cfg.vlans[v])cfg.vlans[v]={name:defName(v),state:'enable'};};
@@ -859,17 +917,158 @@ function dhcpRequest(hid){
   return {fail:'noserver'};
 }
 
+/* ---- interface speed / duplex ---- */
+function physTargets(c){if(c.s.ifSel.list.some(n=>isAggName(String(n)))){out(c.s,'% Speed and duplex are set on the member ports, not the aggregator');return null;}return c.s.ifSel.list.map(n=>c.d.cfg.ports[n]);}
+for(const v of ['auto','10','100','1000'])def('if-port',`speed ${v}`,c=>{const T=physTargets(c);if(T)for(const p of T)p.speed=v;});
+for(const v of ['auto','full','half'])def('if-port',`duplex ${v}`,c=>{const T=physTargets(c);if(T)for(const p of T)p.duplex=v;});
+def('if-port','switchport',()=>{});
+def(U,'show interface status',c=>{const d=c.d,id=d.def.id,L=['Port        Name               Status      Vlan   Duplex  Speed   Type'];
+  for(const n of portNames(d.def)){const p=d.cfg.ports[n],e=effPort(d.cfg,n),x=linkAt(id,n),up=portRunning(id,n);
+    const st=!adminUp(id,n)?'disabled':up?'connected':(x&&!speedOk(x.link)?'err-speed':'notconnect');
+    const vl=e.mode==='trunk'?'trunk':String(e.access);const dup=up?(p.duplex==='auto'?'a-full':p.duplex):p.duplex;const sp=up?(p.speed==='auto'?'a-'+linkSpeed(id,n):p.speed):p.speed;
+    L.push(n.padEnd(12)+(p.desc||'').slice(0,18).padEnd(19)+st.padEnd(12)+vl.padEnd(7)+dup.padEnd(8)+sp.padEnd(8)+(+n.split('.')[2]>d.def.nports-2&&d.def.nports===10?'SFP':'1000BaseTX'));}
+  out(c.s,L.join('\n'));});
+
+/* ---- users, banner, lines ---- */
+def('config','username <WORD:u> privilege <PRIVL:p> password <WORD:pw>',c=>{c.d.cfg.users[c.a.u]={priv:c.a.p,hash:pwHash(c.a.pw)};});
+def('config','username <WORD:u> privilege <PRIVL:p> password 8 <WORD:h>',c=>{c.d.cfg.users[c.a.u]={priv:c.a.p,hash:c.a.h};});
+def('config','username <WORD:u> password <WORD:pw>',c=>{const o=c.d.cfg.users[c.a.u];c.d.cfg.users[c.a.u]={priv:o?o.priv:1,hash:pwHash(c.a.pw)};});
+def('config','no username <WORD:u>',c=>{const U_=c.d.cfg.users;if(!U_[c.a.u]){out(c.s,`% User ${c.a.u} does not exist`);return;}
+  if(U_[c.a.u].priv===15&&Object.values(U_).filter(x=>x.priv===15).length===1){out(c.s,'% Cannot delete the last privilege 15 user');return;}delete U_[c.a.u];});
+def('config','service password-encryption',()=>{});
+def('config','banner motd <LINE:t>',c=>{c.d.cfg.banner=c.a.t.slice(0,200);});
+def('config','no banner motd',c=>{c.d.cfg.banner=null;});
+def('config','line con 0',c=>{c.s.mode='line';c.s.line='con';});
+def('config','line vty 0 4',c=>{c.s.mode='line';c.s.line='vty';});
+def('line','exec-timeout <TMIN:m>',c=>{c.d.cfg.lines[c.s.line]=[c.a.m,0];});
+def('line','exec-timeout <TMIN:m> <TSEC:sec>',c=>{c.d.cfg.lines[c.s.line]=[c.a.m,c.a.sec];});
+def('line','no exec-timeout',c=>{c.d.cfg.lines[c.s.line]=null;});
+def('line','login',()=>{});
+def(U,'show users',c=>{const id=c.d.def.id,L=['Line      User                Host(s)              Idle        Location        Priv'];
+  if(S[id]&&S[id].login==='ok')L.push('con 0'.padEnd(10)+(S[id].user||'manager').padEnd(20)+'idle'.padEnd(21)+'00:00:00'.padEnd(12)+'ttyS0'.padEnd(16)+(S[id].priv||15));
+  let n=0;for(const x in S){const r=S[x].remote;if(r&&r.id===id&&r.sess.login==='ok'){const src=pingCalc(x,r.ip).src||'?';L.push(`vty ${n++}`.padEnd(10)+r.sess.user.padEnd(20)+'idle'.padEnd(21)+'00:00:00'.padEnd(12)+src.padEnd(16)+(r.sess.priv||15));}}
+  out(c.s,L.join('\n'));});
+def(U,'show history',c=>{out(c.s,(c.s.hist||[]).slice(-50).map((h,i)=>`  ${String(i+1).padStart(3)}  ${h}`).join('\n')||'% No history');});
+
+/* ---- clock, NTP ---- */
+def('priv','clock set <TIME:t> <DAYN:dd> <MON:m> <YEAR:y>',c=>{const [h,mi,se]=c.a.t.split(':').map(Number);const d=c.d;
+  const target=Date.UTC(c.a.y,c.a.m,c.a.dd,h,mi,se)-tzOff(d);d.clockOff=target-Date.now();logEv(d,'user.notice','IMI[1036]: System clock set manually');});
+def('config','clock timezone <WORD:n> plus <TZH:h>',c=>{c.d.cfg.tz={name:c.a.n.slice(0,6),dir:'plus',h:c.a.h};});
+def('config','clock timezone <WORD:n> minus <TZH:h>',c=>{c.d.cfg.tz={name:c.a.n.slice(0,6),dir:'minus',h:c.a.h};});
+def('config','no clock timezone',c=>{c.d.cfg.tz=null;});
+def('config','ntp server <IP:ip>',c=>{const l=c.d.cfg.ntp.servers;if(!l.includes(c.a.ip))l.push(c.a.ip);});
+def('config','no ntp server <IP:ip>',c=>{c.d.cfg.ntp.servers=c.d.cfg.ntp.servers.filter(x=>x!==c.a.ip);});
+def('config','ntp master',c=>{c.d.cfg.ntp.master=12;});def('config','ntp master <STRAT:n>',c=>{c.d.cfg.ntp.master=c.a.n;});
+def('config','no ntp master',c=>{c.d.cfg.ntp.master=null;});
+function ntpPeers(d){return d.cfg.ntp.servers.map(ip=>{const tid=Object.keys(D).find(id=>D[id].def.kind==='switch'&&ownsIp(id,ip));const r=pingCalc(d.def.id,ip);
+  const ok=r.ok&&tid&&D[tid].cfg.ntp.master!==null;return {ip,ok,st:ok?D[tid].cfg.ntp.master:16,tid};});}
+function ntpSync(d){if(d.cfg.ntp.master!==null&&!d.cfg.ntp.servers.length)return {self:true};const p=ntpPeers(d).find(x=>x.ok);if(p){d.clockOff=D[p.tid].clockOff||0;}return p||null;}
+def(U,'show ntp status',c=>{const d=c.d,p=ntpSync(d);
+  if(p&&p.self)out(c.s,`Clock is synchronized, stratum ${d.cfg.ntp.master}, reference is 127.127.1.0 (local clock, ntp master)`);
+  else if(p)out(c.s,`Clock is synchronized, stratum ${p.st+1}, reference is ${p.ip}\nreference time is ${new Date(devNow(d)).toUTCString()}\nclock offset is -0.021 msec, root delay is 0.512 msec`);
+  else out(c.s,'Clock is unsynchronized, stratum 16, no reference clock'+(d.cfg.ntp.servers.length?'':'\n% No NTP servers are configured'));});
+def(U,'show ntp associations',c=>{const d=c.d,L=['     remote           refid      st t when poll reach   delay   offset  jitter','=============================================================================='];
+  const peers=ntpPeers(d),best=peers.find(x=>x.ok);for(const p of peers)L.push((p===best?'*':' ')+p.ip.padEnd(20)+(p.ok?'LOCAL(0)':'.INIT.').padEnd(11)+String(p.st).padStart(2)+' u '+(p.ok?'  12':'   -')+'   64 '+(p.ok?' 377':'   0')+(p.ok?'    0.512   -0.021   0.004':'    0.000    0.000   0.000'));
+  if(!peers.length)L.push('% No NTP servers are configured');out(c.s,L.join('\n'));});
+
+/* ---- SNMP, DNS ---- */
+def('config','snmp-server',c=>{c.d.cfg.snmp.enabled=true;});def('config','no snmp-server',c=>{c.d.cfg.snmp.enabled=false;});
+def('config','snmp-server community <WORD:n>',c=>{c.d.cfg.snmp.communities[c.a.n]='ro';});
+def('config','snmp-server community <WORD:n> ro',c=>{c.d.cfg.snmp.communities[c.a.n]='ro';});
+def('config','snmp-server community <WORD:n> rw',c=>{c.d.cfg.snmp.communities[c.a.n]='rw';});
+def('config','no snmp-server community <WORD:n>',c=>{delete c.d.cfg.snmp.communities[c.a.n];});
+def('config','snmp-server location <LINE:t>',c=>{c.d.cfg.snmp.location=c.a.t.slice(0,80);});def('config','no snmp-server location',c=>{c.d.cfg.snmp.location='';});
+def('config','snmp-server contact <LINE:t>',c=>{c.d.cfg.snmp.contact=c.a.t.slice(0,80);});def('config','no snmp-server contact',c=>{c.d.cfg.snmp.contact='';});
+def(U,'show snmp-server',c=>{const n=c.d.cfg.snmp;out(c.s,[`SNMP Server .......................... ${n.enabled?'Enabled':'Disabled'}`,'IP Protocol .......................... IPv4','SNMPv3 Engine ID (configured name) ... Not set',`SNMPv3 Engine ID (actual) ............ 0x80001f8880${c.d.def.mac.replace(/\./g,'')}`,'SNMP Port ............................ 161'].join('\n'));});
+def(U,'show snmp-server community',c=>{const m=c.d.cfg.snmp.communities,L=[];for(const k of Object.keys(m).sort())L.push(`SNMP community information:`,`  Community Name ........... ${k}`,`    Access ................. ${m[k]==='rw'?'Read-write':'Read-only'}`,'    View ................... none');out(c.s,L.join('\n')||'% No SNMP communities are configured');});
+def('config','ip name-server <IP:ip>',c=>{const l=c.d.cfg.dns.servers;if(l.length>=3){out(c.s,'% A maximum of 3 name servers can be configured');return;}if(!l.includes(c.a.ip))l.push(c.a.ip);});
+def('config','no ip name-server <IP:ip>',c=>{c.d.cfg.dns.servers=c.d.cfg.dns.servers.filter(x=>x!==c.a.ip);});
+def('config','ip domain-name <WORD:n>',c=>{c.d.cfg.dns.domain=c.a.n;});def('config','no ip domain-name',c=>{c.d.cfg.dns.domain=null;});
+def(U,'show ip name-server',c=>{const x=c.d.cfg.dns;out(c.s,x.servers.length?x.servers.join('\n'):'% No name servers are configured');});
+
+/* ---- SSH / Telnet servers and clients ---- */
+def('config','service ssh',c=>{c.d.cfg.ssh=true;});def('config','no service ssh',c=>{c.d.cfg.ssh=false;});
+def('config','service telnet',c=>{c.d.cfg.telnet=true;});def('config','no service telnet',c=>{c.d.cfg.telnet=false;});
+def(U,'show ssh server',c=>{const on=c.d.cfg.ssh;out(c.s,['Secure Shell Server Configuration','------------------------------------------------------------------------',`  SSH Server                       : ${on?'Enabled':'Disabled'}`,'  Port                             : 22','  Version                          : 2','  Services                         : shell, scp, sftp','  User Authentication              : publickey, password','  Resolve Hosts                    : Disabled','  Session Timeout                  : 0 (Off)','  Login Timeout                    : 60 seconds','  Maximum Authentication Tries     : 5','  Maximum Sessions                 : 20'].join('\n'));});
+def(U,'show telnet',c=>{out(c.s,['Telnet Server Configuration','------------------------------------------------------------',`  Telnet server              : ${c.d.cfg.telnet?'Enabled':'Disabled'}`,'  IPv4 Enabled               : Yes','  Port                       : 23'].join('\n'));});
+function openRemote(c,ip,proto,user){
+  const d=c.d,s=c.s,id=d.def.id;
+  if(s.isRemote||S[id]!==s){out(s,'% Remote sessions can only be opened from a device console in this lab');return;}
+  if(proto==='telnet')out(s,`Trying ${ip}...`);
+  const tid=Object.keys(D).find(x=>D[x].def.kind==='switch'&&ownsIp(x,ip)),r=pingCalc(id,ip);
+  if(!r.ok||!tid){const why=r.fail==='noroute'?'Network is unreachable':(Object.keys(D).some(x=>ownsIp(x,ip))&&r.ok?'Connection refused':'Connection timed out');
+    out(s,proto==='ssh'?`ssh: connect to host ${ip} port 22: ${why}`:`telnet: Unable to connect to remote host: ${why}`);return;}
+  const td=D[tid];
+  if(proto==='ssh'&&!td.cfg.ssh){out(s,`ssh: connect to host ${ip} port 22: Connection refused`);return;}
+  if(proto==='telnet'&&!td.cfg.telnet){out(s,'telnet: Unable to connect to remote host: Connection refused');return;}
+  const rs={buf:s.buf,mode:'user',ifSel:null,hist:[],hIdx:0,login:proto==='ssh'?'pass':'user',pending:null,user:user||s.user||'manager',isRemote:true,via:proto==='ssh'?'ssh':'telnet'};
+  if(proto==='telnet'){out(s,`Connected to ${ip}.`);out(s,"Escape character is '^]'.");out(s,'');}
+  s.remote={id:tid,ip,sess:rs};
+}
+def(U,'telnet <IP:ip>',c=>openRemote(c,c.a.ip,'telnet'));
+def(U,'ssh <IP:ip>',c=>openRemote(c,c.a.ip,'ssh'));
+def(U,'ssh user <WORD:u> <IP:ip>',c=>openRemote(c,c.a.ip,'ssh',c.a.u));
+
+/* ---- files and backups ---- */
+function replayConfig(def,text,base){
+  const td={def,cfg:normalizeCfg(def,clone(base)),startup:null,leases:{},files:{},log:[],boot:Date.now()};
+  const s={buf:[],mode:'config',login:'ok',ifSel:null,pending:null,sink:[]};let bad=0;
+  for(const raw of String(text).split('\n')){const line=raw.trim();if(!line||line.startsWith('!'))continue;if(line==='end'){s.mode='config';continue;}
+    if(!/^\s/.test(raw)){s.mode='config';s.ifSel=null;}
+    const n=s.sink.length;execLine(td,s,line);if(s.sink.slice(n).some(l=>l.startsWith('%')&&!l.startsWith('% Warning')))bad++;}
+  return {cfg:td.cfg,bad};
+}
+const fileText=(d,f)=>f==='default.cfg'?(d.startup?configText(d.def,d.startup):null):(d.files[f]?d.files[f].text:null);
+def('priv','dir',c=>{const d=c.d,fam=d.def.model.split('-')[0],L=[];const ts=t=>fmtLocal(d,t).slice(5,17)+' '+fmtLocal(d,t).slice(0,4);
+  L.push(`${'47290112'.padStart(10)} -rw- ${ts(d.boot)}  ${fam}-5.5.3-sim.rel`);
+  if(d.startup)L.push(`${String(configText(d.def,d.startup).length).padStart(10)} -rw- ${ts(devNow(d))}  default.cfg`);
+  for(const f of Object.keys(d.files).sort())L.push(`${String(d.files[f].text.length).padStart(10)} -rw- ${ts(d.files[f].t)}  ${f}`);
+  out(c.s,L.join('\n'));});
+def('priv','show file <FILE:f>',c=>{const t=fileText(c.d,c.a.f);if(t===null){out(c.s,`% File flash:/${c.a.f} does not exist`);return;}out(c.s,t);});
+def('priv','copy running-config <FILE:f>',c=>{if(c.a.f==='default.cfg')return doWrite(c);c.d.files[c.a.f]={text:configText(c.d.def,c.d.cfg),t:devNow(c.d)};out(c.s,'Building configuration...');out(c.s,'[OK]');});
+def('priv','copy startup-config <FILE:f>',c=>{if(!c.d.startup){out(c.s,'% Startup configuration does not exist');return;}c.d.files[c.a.f]={text:configText(c.d.def,c.d.startup),t:devNow(c.d)};out(c.s,'Copying...');out(c.s,'Successful operation');});
+def('priv','copy <FILE:f> startup-config',c=>{const t=fileText(c.d,c.a.f);if(t===null){out(c.s,`% File flash:/${c.a.f} does not exist`);return;}
+  const r=replayConfig(c.d.def,t,factoryCfg(c.d.def));c.d.startup=r.cfg;out(c.s,'Copying...');out(c.s,r.bad?`% ${r.bad} line(s) could not be applied`:'Successful operation');});
+def('priv','copy <FILE:f> running-config',c=>{const t=fileText(c.d,c.a.f);if(t===null){out(c.s,`% File flash:/${c.a.f} does not exist`);return;}
+  const r=replayConfig(c.d.def,t,c.d.cfg);c.d.cfg=r.cfg;out(c.s,r.bad?`% Merged with ${r.bad} line(s) that could not be applied`:'Successful operation');});
+def('priv','delete <FILE:f>',c=>{const f=c.a.f;if(f==='default.cfg'){if(!c.d.startup){out(c.s,'% File flash:/default.cfg does not exist');return;}c.d.startup=null;return;}
+  if(!c.d.files[f]){out(c.s,`% File flash:/${f} does not exist`);return;}delete c.d.files[f];});
+def(U,'show boot',c=>{const d=c.d,fam=d.def.model.split('-')[0];out(c.s,['Boot configuration','----------------------------------------------------------------',`Current software   : ${fam}-5.5.3-sim.rel`,`Current boot image : flash:/${fam}-5.5.3-sim.rel`,'Backup  boot image : Not set','Default boot config: flash:/default.cfg',`Current boot config: flash:/default.cfg (${d.startup?'file exists':'file does not exist'})`,'Backup  boot config: Not set'].join('\n'));});
+
+/* ---- log, platform ---- */
+def(U,'show log',c=>{out(c.s,['<date> <time> <facility>.<severity> <program[<pid>]>: <message>','-------------------------------------------------------------------------',...(c.d.log||[])].join('\n'));});
+def(U,'show log tail',c=>{out(c.s,(c.d.log||[]).slice(-10).join('\n')||'% Log is empty');});
+def('priv','clear log',c=>{c.d.log=[];});
+def(U,'show cpu',c=>{const u=(3+((Date.now()/7000)%5)).toFixed(1);out(c.s,[`CPU averages:`,`  1 second: ${u}%, 20 seconds: ${(+u-0.6).toFixed(1)}%, 60 seconds: ${(+u-0.9).toFixed(1)}%`,'System load averages:','  1 minute: 0.21, 5 minutes: 0.18, 15 minutes: 0.15','Current CPU load:',`  userspace: ${(u*0.6).toFixed(0)}%, kernel: ${(u*0.3).toFixed(0)}%, interrupts: 0% iowaits: 0%`].join('\n'));});
+def(U,'show memory',c=>{out(c.s,['RAM total: 2045512 kB; free: 1588204 kB; buffers: 18032 kB','','user processes','==============','  pid name                 mem%    size    peak    data   stk','  812 syslog-ng             0       2848    4096     612   132',' 1036 imi                   1      21004   23012   12020   132',' 1490 imish                 0       6620    6620    1880   132'].join('\n'));});
+def(U,'show system environment',c=>{out(c.s,['Environment Monitoring Status','Overall Status: Normal','','Resource ID: 1  Name: '+c.d.def.model,'ID  Sensor (Units)                                Reading  Low Limit High Limit Status','1   Fan: Fan 1 (Rpm)                              5233     2000      -          Ok','2   Voltage: 3.3V (Volts)                         3.302    2.967     3.630      Ok','3   Temp: Internal (Degrees C)                    41       -         80         Ok','4   PSU: Main (Volts)                             12.02    10.80     13.20      Ok'].join('\n'));});
+def(U,'show lldp neighbors detail',c=>{const d=c.d;if(!d.cfg.lldp){out(c.s,'% LLDP is not running. Enable it with "lldp run" in global configuration mode.');return;}const L=[];
+  for(const pn of portNames(d.def)){const x=linkAt(d.def.id,pn);if(!x||!physUp(x.link))continue;const pd=D[x.peer[0]];if(pd.def.kind!=='switch'||!pd.cfg.lldp)continue;
+    const mg=Object.values(pd.cfg.vifs).find(v=>v.ip);const pp=pd.cfg.ports[x.peer[1]];
+    L.push(`Local ${pn}:`,'  Neighbors table:','    Chassis ID Type ............ MAC address',`    Chassis ID ................. ${pd.def.mac}`,'    Port ID Type ............... Interface name',`    Port ID .................... ${x.peer[1]}`,'    TTL ........................ 120 (secs)',
+      `    Port Description ........... ${pp.desc||x.peer[1]}`,`    System Name ................ ${pd.cfg.hostname}`,`    System Description ......... Allied Telesis router/switch, AW+ v5.5.3 (simulated) ${pd.def.model}`,
+      '    System Capabilities - Supported : Bridge, Router',`                          Enabled   : Bridge${mg?', Router':''}`,`    Management Address ......... ${mg?mg.ip:pd.def.mac}`,'');}
+  out(c.s,L.join('\n')||'% No LLDP neighbors');});
+
 /* ================= Executor ================= */
 function execLine(d,s,line){
   invalidate();const res=execLine_(d,s,line);invalidate();return res;
 }
 function execLine_(d,s,line){
+  const pm=/^(.*?)\s*\|\s*(\S+)\s*(.*)$/.exec(line);
+  if(pm&&pm[1].trim()){const kind=['include','exclude','begin'].find(k=>k.startsWith(pm[2].toLowerCase()));
+    if(!kind||!pm[3]){out(s,'% Output modifiers: | include TEXT, | exclude TEXT or | begin TEXT');return;}
+    const saved=s.sink,buf=[];s.sink=buf;let res;
+    const finish=()=>{s.sink=saved;let L=buf;const t=pm[3];if(kind==='include')L=L.filter(l=>l.includes(t));else if(kind==='exclude')L=L.filter(l=>!l.includes(t));else{const i=L.findIndex(l=>l.includes(t));L=i<0?[]:L.slice(i);}
+      if(L.length)out(s,L.join('\n'));};
+    try{res=execLine_(d,s,pm[1]);}catch(e){s.sink=saved;throw e;}
+    if(res&&res.then)return res.finally(finish);finish();return;}
   const words=line.trim().split(/\s+/).filter(Boolean);if(!words.length)return;
   let mode=s.mode,w=words,off=0;
   if(CFGMODES.includes(mode)&&words[0].toLowerCase()==='do'){mode='priv';w=words.slice(1);off=1;if(!w.length){out(s,'% Incomplete command.');return;}}
   const r=matchWords(d,mode,w);
   if(r.ambiguous){out(s,`% Ambiguous command:  "${line.trim()}"`);return;}
-  if(r.failIdx!==undefined){const pos=[...line.matchAll(/\S+/g)].map(m=>m.index);const col=promptOf(d.def.id).length+(pos[r.failIdx+off]||0);
+  if(r.failIdx!==undefined){const pos=[...line.matchAll(/\S+/g)].map(m=>m.index);const col=promptFor(d,s).length+(pos[r.failIdx+off]||0);
     out(s,' '.repeat(col)+'^');out(s,"% Invalid input detected at '^' marker.");return;}
   const comp=r.states.filter(x=>x.done||x.c.tokens.length===w.length);
   if(!comp.length){out(s,'% Incomplete command.');return;}
@@ -903,7 +1102,7 @@ const HOSTHELP=['  dhcp                      Get an address by DHCP','  ip ADDR/
 async function hostCmd(id,v){
   invalidate();const s=S[id],d=D[id],c=d.cfg,w=v.trim().split(/\s+/).filter(Boolean);if(!w.length)return;const cmd=w[0].toLowerCase();
   if(cmd==='?'||cmd==='help'){out(s,HOSTHELP.join('\n'));return;}
-  if(cmd==='clear'&&!w[1]){s.buf=[];return;}
+  if(cmd==='clear'&&!w[1]){s.buf.length=0;return;}
   if(cmd==='dhcp'||(cmd==='ip'&&w[1]==='dhcp')){c.ip=null;c.len=null;c.gw=null;c.dhcp=true;invalidate();
     for(const ch of 'DDD'){if(!s.sink)await sleep(250);}const r=dhcpRequest(id);
     if(r.fail==='noserver'){out(s,'DDD');out(s,"Can't find dhcp server");}else if(r.fail){out(s,'DD');out(s,`DHCP pool ${r.pool} has no free addresses`);}
@@ -1059,13 +1258,14 @@ const testOk=t=>t.blocked?pingCalc(t.from,tgt(t)).fail==='acl':reach(t.from,tgt(
 let currentScen='factory';
 function loadScenario(key){
   const sc=SCENARIOS[key];currentScen=key;
-  for(const id in D){D[id].cfg=factoryCfg(D[id].def);D[id].startup=null;D[id].boot=Date.now();D[id].leases={};}
+  for(const id in D){D[id].cfg=factoryCfg(D[id].def);D[id].startup=null;D[id].boot=Date.now();D[id].leases={};D[id].files={};D[id].clockOff=0;}
+  LAST=null;
   invalidate();
   for(const id in sc.scripts)runScript(id,sc.scripts[id]);
   if(sc.scripts===SOLUTION)dhcpRequest('PC1');
   if(sc.hosts)for(const id in sc.hosts)Object.assign(D[id].cfg,sc.hosts[id]);
   if(sc.fault)for(const id in sc.fault)runScript(id,sc.fault[id]);
-  for(const id in D)S[id]=newSession(id);
+  for(const id in D){S[id]=newSession(id);if(D[id].def.kind==='switch')seedLog(D[id]);}
   invalidate();
 }
 const hn=id=>D[id].cfg.hostname;
@@ -1114,10 +1314,10 @@ const EXERCISES=[
 
 /* ================= Persistence ================= */
 const KEY='awplus-testlab-v1';
-function snapshot(){const o={v:1,scenario:currentScen,devices:{}};for(const id in D)o.devices[id]={cfg:D[id].cfg,startup:D[id].startup,leases:D[id].leases};return o;}
+function snapshot(){const o={v:1,scenario:currentScen,devices:{}};for(const id in D)o.devices[id]={cfg:D[id].cfg,startup:D[id].startup,leases:D[id].leases,files:D[id].files,clockOff:D[id].clockOff||0};return o;}
 function applySnapshot(o){if(!o||o.v!==1||!o.devices)throw new Error('Not an AW+ Test Lab export');
   for(const id in D){const x=o.devices[id];if(!x||!x.cfg)throw new Error('Missing device '+id);}
-  for(const id in D){D[id].cfg=normalizeCfg(D[id].def,clone(o.devices[id].cfg));D[id].startup=o.devices[id].startup?normalizeCfg(D[id].def,clone(o.devices[id].startup)):null;D[id].boot=Date.now();D[id].leases=o.devices[id].leases||{};S[id]=newSession(id);}
+  for(const id in D){D[id].cfg=normalizeCfg(D[id].def,clone(o.devices[id].cfg));D[id].startup=o.devices[id].startup?normalizeCfg(D[id].def,clone(o.devices[id].startup)):null;D[id].boot=Date.now();D[id].leases=o.devices[id].leases||{};D[id].files=o.devices[id].files||{};D[id].clockOff=o.devices[id].clockOff||0;S[id]=newSession(id);if(D[id].def.kind==='switch')seedLog(D[id]);}LAST=null;
   currentScen=SCENARIOS[o.scenario]?o.scenario:'factory';invalidate();}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(snapshot()));}catch(e){}}
 function restore(){try{const t=localStorage.getItem(KEY);if(t){applySnapshot(JSON.parse(t));return true;}}catch(e){}return false;}
@@ -1128,7 +1328,7 @@ const $=s=>document.querySelector(s);
 const esc=t=>String(t).replace(/[&<>"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
 function render(){
   const s=S[active];$('#out').textContent=s.buf.join('\n')+(s.buf.length?'\n':'');
-  const inp=$('#cmd');$('#prompt').textContent=s.busy?'':promptOf(active);inp.type=(s.login==='pass'&&!s.pending)?'password':'text';inp.disabled=s.busy;
+  const inp=$('#cmd');$('#prompt').textContent=s.busy?'':promptOf(active);const es=effOf(active).s;inp.type=(es.login==='pass'&&!es.pending)?'password':'text';inp.disabled=s.busy;
   const t=$('#term');t.scrollTop=t.scrollHeight;
 }
 function devLabel(id){const d=D[id];return d.def.kind==='switch'?d.cfg.hostname:id;}
@@ -1181,6 +1381,16 @@ const REF=[
   ['VLAN database',[['vlan 10 name Data','Create and name'],['vlan 10,20,30-35','Create several'],['vlan 30 state disable','Suspend a VLAN'],['no vlan 30','Delete']]],
   ['Port interface',[['switchport mode access | trunk','Port mode'],['switchport access vlan 10','Access VLAN'],['switchport trunk allowed vlan add|remove LIST','Tagged VLANs'],['switchport trunk allowed vlan all|none|except LIST',''],
     ['switchport trunk native vlan 1 | none','Untagged VLAN on a trunk'],['shutdown / no shutdown','Admin state'],['description TEXT','Label']]],
+  ['Everyday tools',[['show ... | include|exclude|begin TEXT','Filter any output'],['show log / show log tail','System log: logins, link and STP changes, config commands'],
+    ['show interface status','Port status, VLAN, speed, duplex'],['show arp','ARP table with the port each address was learned on'],['show lldp neighbors detail','Neighbor names, ports and management addresses'],
+    ['show users / show history','Who is logged in, what you typed'],['show cpu | memory | system environment','Platform health'],['ping A.B.C.D repeat N','Send N echo requests'],
+    ['telnet A.B.C.D / ssh [user NAME] A.B.C.D','Log in to another switch (exit to return)']]],
+  ['Files and backups',[['dir','Files in flash'],['copy running-config backup.cfg','Save a backup'],['copy backup.cfg running-config','Merge a backup into the running config'],
+    ['copy backup.cfg startup-config','Use a backup at next boot'],['show file backup.cfg','View a file'],['delete backup.cfg','Delete a file'],['show boot','Boot image and config']]],
+  ['Management',[['username NAME privilege 1-15 password PASS','(config) Local user. Level 15 can enable'],['banner motd TEXT','(config) Login banner'],['service ssh / no service telnet','(config) Remote access servers'],
+    ['clock set HH:MM:SS DD MON YYYY','Set the clock'],['clock timezone NAME plus|minus H','(config) Time zone'],['ntp server A.B.C.D / ntp master [1-15]','(config) Time sync'],
+    ['snmp-server / snmp-server community NAME ro|rw','(config) SNMP agent'],['snmp-server location|contact TEXT','(config) Shown in show system'],['ip name-server A.B.C.D / ip domain-name NAME','(config) DNS'],
+    ['line con 0 | line vty 0 4 → exec-timeout M [S]','(config) Idle timeout'],['speed auto|10|100|1000 / duplex auto|full|half','(port) Mismatched fixed speeds take the link down']]],
   ['Spanning tree',[['spanning-tree priority 4096','(config) Bridge priority, lowest becomes root'],['no spanning-tree enable','(config) Turn STP off. Use with care'],['spanning-tree edgeport','(interface) End-device port'],
     ['spanning-tree path-cost N','(interface) Override the cost'],['show spanning-tree [brief]','Root, roles and port states']]],
   ['Link aggregation',[['channel-group 1 mode active|passive','(port) LACP member of po1'],['static-channel-group 1','(port) Static member of sa1'],['interface po1 | sa1','Configure the aggregator, not the members'],
@@ -1194,38 +1404,62 @@ const REF=[
 ];
 function renderRef(){$('#pane-ref').innerHTML=REF.map(([h,rows])=>`<h3>${h}</h3><table>${rows.map(r=>`<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td></tr>`).join('')}</table>`).join('')+
   '<p class="msg">Commands can be shortened (<code>conf t</code>, <code>sh ip int br</code>, <code>sw mo tr</code>). Press <kbd>?</kbd> anywhere for context help.</p>';}
-function refresh(){invalidate();render();renderTabs();renderTopo();renderChecks();}
+let LAST=null;
+function trackEvents(){const cur={};
+  for(const id in D){const d=D[id];if(d.def.kind!=='switch')continue;
+    for(const pn of portNames(d.def))cur[id+' '+pn]=portRunning(id,pn)?'up':'down';
+    if(stpOn(id))for(const lp of logicalPorts(d)){const r=lpRole(id,lp);if(r.role!=='disabled')cur[id+' stp '+lp]=r.role;}
+    for(const v in d.cfg.vifs)cur[id+' vlan'+v]=vifUp(id,+v)?'up':'down';}
+  if(LAST)for(const k in cur){if(LAST[k]===cur[k]||(LAST[k]===undefined&&k.includes(' stp ')))continue;const [id,a,b]=k.split(' '),d=D[id];
+    if(a==='stp')logEv(d,'user.notice',`RSTP[1101]: ${b}: port role changed to ${roleName(cur[k])}`);else logEv(d,'user.notice',`IMI[1036]: Interface ${a} changed state to ${cur[k]}`);}
+  LAST=cur;}
+function refresh(){invalidate();trackEvents();render();renderTabs();renderTopo();renderChecks();}
 function selectDev(id){active=id;refresh();$('#cmd').focus();}
 function afterCommand(){save();refresh();}
 
+function handleLine(d,s,v){
+  if(s.pending){const pd=s.pending;s.pending=null;return pd.cb(v.trim().toLowerCase());}
+  const tty=s.isRemote?'vty0':'ttyS0';
+  if(s.login==='user'){if(v.trim()){s.user=v.trim();s.login='pass';}return;}
+  if(s.login==='pass'){const u=d.cfg.users[s.user];
+    if(u&&u.hash===pwHash(v)){s.login='ok';s.mode='user';s.priv=u.priv;out(s,'');if(d.cfg.banner){out(s,d.cfg.banner);out(s,'');}out(s,'AlliedWare Plus (TM) 5.5.3 (simulated)');out(s,'');
+      logEv(d,'authpriv.notice',`${s.isRemote?(s.via==='ssh'?'sshd[2210]: Accepted password for':'login[2210]: login of'):'login[1501]: login of'} ${s.user} on ${tty}`);}
+    else{out(s,'');out(s,s.isRemote&&s.via==='ssh'?'Permission denied, please try again.':'Login incorrect');out(s,'');s.fails=(s.fails||0)+1;
+      logEv(d,'authpriv.warning',`login[1501]: FAILED LOGIN for ${s.user} on ${tty}`);if(s.isRemote&&s.fails>=3)s.closed=true;else if(s.isRemote&&s.via==='ssh')s.login='pass';else s.login='user';}
+    return;}
+  if(v.trim())s.hist.push(v);s.hIdx=s.hist.length;
+  if(CFGMODES.includes(s.mode)&&v.trim())logEv(d,'user.notice',`IMISH[1490]: [${s.user||'manager'}@${tty}]${v.trim()}`);
+  return execLine(d,s,v);
+}
+function checkRemote(s){if(s.remote&&s.remote.sess.closed){out(s,`Connection to ${s.remote.ip} closed.`);s.remote=null;}}
 function submit(){
   const s=S[active],inp=$('#cmd'),v=inp.value;inp.value='';
   if(s.busy)return;
-  const p=promptOf(active);s.buf.push((s.login==='pass'&&!s.pending)?p:p+v);
+  const {d:ed,s:es}=effOf(active);
+  const p=promptOf(active);s.buf.push((es.login==='pass'&&!es.pending)?p:p+v);
   const id=active;let res;
-  if(s.pending){const pd=s.pending;s.pending=null;res=pd.cb(v.trim().toLowerCase());}
-  else if(D[id].def.kind==='host'){if(v.trim()){s.hist.push(v);}s.hIdx=s.hist.length;res=hostCmd(id,v);}
-  else if(s.login==='user'){if(v.trim()){s.user=v.trim();s.login='pass';}}
-  else if(s.login==='pass'){if(s.user==='manager'&&v==='friend'){s.login='ok';s.mode='user';out(s,'');out(s,'AlliedWare Plus (TM) 5.5.3 (simulated)');out(s,'');}else{out(s,'');out(s,'Login incorrect');out(s,'');s.login='user';}}
-  else{if(v.trim())s.hist.push(v);s.hIdx=s.hist.length;res=execLine(D[id],s,v);}
-  if(res&&typeof res.then==='function'){s.busy=true;render();res.finally(()=>{s.busy=false;afterCommand();if(id===active)$('#cmd').focus();});}
+  if(ed.def.kind==='host'){if(v.trim()){s.hist.push(v);}s.hIdx=s.hist.length;res=hostCmd(id,v);}
+  else res=handleLine(ed,es,v);
+  checkRemote(s);
+  if(res&&typeof res.then==='function'){s.busy=true;render();res.finally(()=>{s.busy=false;checkRemote(s);afterCommand();if(id===active)$('#cmd').focus();});}
   afterCommand();
 }
 function boot(){
   if(!restore())loadScenario('factory');
   const inp=$('#cmd');
   inp.addEventListener('keydown',e=>{
-    const s=S[active];if(s.busy){e.preventDefault();return;}
-    const isSw=D[active].def.kind==='switch'&&s.login==='ok'&&!s.pending;
+    const s0=S[active];if(s0.busy){e.preventDefault();return;}
+    const {d:ed,s}=effOf(active);
+    const isSw=ed.def.kind==='switch'&&s.login==='ok'&&!s.pending;
     if(e.key==='Enter'){e.preventDefault();submit();}
-    else if(e.key==='?'&&isSw){e.preventDefault();s.buf.push(promptOf(active)+inp.value+'?');s.buf.push(...helpList(D[active],s,inp.value));render();}
-    else if(e.key==='Tab'&&isSw){e.preventDefault();const r=completions(D[active],s,inp.value);if(!r||!r.list.length)return;
+    else if(e.key==='?'&&isSw){e.preventDefault();s0.buf.push(promptOf(active)+inp.value+'?');s0.buf.push(...helpList(ed,s,inp.value));render();}
+    else if(e.key==='Tab'&&isSw){e.preventDefault();const r=completions(ed,s,inp.value);if(!r||!r.list.length)return;
       if(r.list.length===1)inp.value=inp.value.slice(0,inp.value.length-r.partial.length)+r.list[0]+' ';
-      else{s.buf.push(promptOf(active)+inp.value);s.buf.push('  '+r.list.join('  '));render();}}
+      else{s0.buf.push(promptOf(active)+inp.value);s0.buf.push('  '+r.list.join('  '));render();}}
     else if(e.key==='ArrowUp'||e.key==='ArrowDown'){if(s.login!=='ok'||s.pending)return;e.preventDefault();
       s.hIdx=Math.max(0,Math.min(s.hist.length,s.hIdx+(e.key==='ArrowUp'?-1:1)));inp.value=s.hist[s.hIdx]||'';}
-    else if(e.ctrlKey&&(e.key==='z'||e.key==='Z')&&isSw){e.preventDefault();s.buf.push(promptOf(active)+inp.value+'^Z');inp.value='';if(CFGMODES.includes(s.mode)){s.mode='priv';s.ifSel=null;}render();}
-    else if(e.ctrlKey&&(e.key==='c'||e.key==='C')&&!window.getSelection().toString()){e.preventDefault();s.buf.push(promptOf(active)+inp.value+'^C');inp.value='';if(s.pending)s.pending=null;render();}
+    else if(e.ctrlKey&&(e.key==='z'||e.key==='Z')&&isSw){e.preventDefault();s0.buf.push(promptOf(active)+inp.value+'^Z');inp.value='';if(CFGMODES.includes(s.mode)){s.mode='priv';s.ifSel=null;}render();}
+    else if(e.ctrlKey&&(e.key==='c'||e.key==='C')&&!window.getSelection().toString()){e.preventDefault();s0.buf.push(promptOf(active)+inp.value+'^C');inp.value='';if(s.pending)s.pending=null;render();}
   });
   $('#term').addEventListener('click',()=>{if(!window.getSelection().toString())inp.focus();});
   $('#devtabs').addEventListener('click',e=>{const b=e.target.closest('button[data-id]');if(b)selectDev(b.dataset.id);});
@@ -1238,7 +1472,7 @@ function boot(){
     setTimeout(()=>{if(armed===btn){btn.textContent=btn.dataset.label;armed=null;}},3500);};
   $('#pane-ft').addEventListener('click',e=>{const b=e.target.closest('button[data-scen]');if(!b)return;arm(b,'Click again to replace the current lab',()=>{loadScenario(b.dataset.scen);active='SW1';afterCommand();});});
   $('#btnReset').addEventListener('click',e=>arm(e.currentTarget,'Click again to wipe everything',()=>{loadScenario('factory');active='SW1';afterCommand();$('#btnReset').textContent='Reset to factory';}));
-  $('#btnClear').addEventListener('click',()=>{S[active].buf=[];render();inp.focus();});
+  $('#btnClear').addEventListener('click',()=>{S[active].buf.length=0;render();inp.focus();});
   // modal
   const modal=$('#modal');let mode='';
   const openM=m=>{mode=m;modal.hidden=false;$('#mMsg').textContent='';$('#mFile').hidden=m!=='import';

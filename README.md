@@ -35,7 +35,14 @@ Switch login: `manager` / `friend`
 - Loop detection: if spanning tree is disabled or misconfigured, redundant links cause a broadcast storm and traffic in the affected VLANs fails
 - Hardware IP ACLs: `access-list 3000-3699 permit|deny ip|icmp SRC DST` (`A.B.C.D/M`, `host A.B.C.D`, `any`), applied inbound with `access-group`, unmatched traffic permitted; `show access-list`
 - DHCP server: `ip dhcp pool` with `network`, `range`, `default-router`, `dns-server`, `lease`; `service dhcp-server`; `show ip dhcp pool|binding`; `clear ip dhcp binding all`
-- `ping` and `traceroute` computed from the real L2/L3 state of the lab
+- Everyday sandbox commands:
+  - Output filters on any command: `| include`, `| exclude`, `| begin`
+  - `show log` (logins, link and spanning tree changes, config commands), `show interface status`, `show arp`, `show lldp neighbors detail`, `show users`, `show history`, `show cpu`, `show memory`, `show system environment`
+  - Files and backups: `dir`, `copy running-config FILE.cfg`, `copy FILE.cfg running-config|startup-config`, `show file`, `delete`, `show boot`. Saved configs are replayed through the CLI, so any running-config can be restored
+  - Remote sessions between switches with `telnet` and `ssh [user NAME]`, honouring reachability, ACLs and whether the server is enabled
+  - Local users with privilege levels, `banner motd`, `service ssh|telnet`, `clock set`, `clock timezone`, NTP client and master, SNMP agent, communities, location and contact, DNS name servers, line exec-timeout
+  - Port `speed` and `duplex`; mismatched fixed speeds bring the link down
+- `ping` (with `repeat N`) and `traceroute` computed from the real L2/L3 state of the lab
 - End devices with a simple host shell (`ip`, `dhcp`, `show`, `ping`, `trace`)
 
 ## Coursework

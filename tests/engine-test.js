@@ -49,6 +49,27 @@ const EXPECT = {
     res.show = run('SW1', ['show spanning-tree brief', 'show etherchannel', 'show etherchannel summary', 'show running-config', 'sh int br', 'sh vlan brief',
       'conf t', 'int port1.0.1', 'switchport mode access', 'int po9', 'end']);
     res.acc = run('SW2', ['show spanning-tree', 'show mac address-table']);
+    // config round trip: every switch's running-config replays onto factory defaults unchanged
+    res.roundTrip = ['SW1', 'SW2', 'SW3'].map(id => { const d = D[id]; const t = configText(d.def, d.cfg); const r = replayConfig(d.def, t, factoryCfg(d.def)); return r.bad === 0 && configText(d.def, r.cfg) === t; }).every(Boolean);
+    // backup file, break config, restore it
+    run('SW2', ['copy running-config backup.cfg', 'configure terminal', 'hostname BROKEN', 'no vlan 99', 'end']);
+    const broken = D.SW2.cfg.hostname;
+    run('SW2', ['copy backup.cfg running-config']);
+    res.restore = broken === 'BROKEN' && D.SW2.cfg.hostname === 'ACCESS1' && !!D.SW2.cfg.vlans[99];
+    res.dir = run('SW2', ['dir', 'show boot']);
+    // pipes
+    res.pipe = run('SW1', ['show running-config | include ip address']);
+    res.pipeOk = res.pipe.split('\n').filter(l => l.startsWith(' ip address')).length === 3 && !res.pipe.includes('hostname');
+    // users, banner, ntp, snmp, speed mismatch
+    run('SW1', ['configure terminal', 'username tech privilege 1 password Secret1', 'banner motd Authorised access only', 'ntp master 4', 'snmp-server', 'snmp-server community public ro', 'snmp-server location Comms room', 'service ssh', 'clock timezone BST plus 1']);
+    run('SW2', ['configure terminal', 'ntp server 192.168.99.1']);
+    res.ntp = run('SW2', ['show ntp status']);
+    res.misc = run('SW1', ['show users', 'show snmp-server community', 'show clock', 'show arp', 'show interface status | include connected', 'show lldp neighbors detail | include System Name', 'show log tail', 'show ip dhcp binding | begin Pool CCTV']);
+    res.rt2 = (() => { const d = D.SW1, t = configText(d.def, d.cfg), r = replayConfig(d.def, t, factoryCfg(d.def)); return r.bad === 0 && configText(d.def, r.cfg) === t; })();
+    run('SW1', ['configure terminal', 'interface port1.0.2', 'speed 100']); run('SW3', ['configure terminal', 'interface port1.0.10', 'speed 1000']); invalidate();
+    res.speedDown = !physUp(LINKS[2]) && !reach('NVR1', '192.168.99.3');
+    run('SW3', ['configure terminal', 'interface port1.0.10', 'speed auto']); invalidate();
+    res.speedUp = physUp(LINKS[2]);
     res.help = helpList(D.SW1, { mode: 'if-port' }, 'channel-group 1 mode ').join('\n');
     return res;
   });
@@ -60,14 +81,26 @@ const EXPECT = {
     console.log(`${ok ? 'PASS' : 'FAIL'} ${k}.${f} = ${r[k][f]} (expected ${EXPECT[k][f]})`);
   }
   const extra = [['storm has a loop', r.storm.storms > 0], ['storm fixed', r.stormFixed.tests === '111111' && r.stormFixed.storms === 0 && r.stormFixed.cross === 'blocked'],
-    ['lacp fixed', r.lacpFixed.tests === '111111'], ['dhcp fixed', r.dhcpFixed.tests === '111111'], ['solved has no loop', r.solved.storms === 0], ['factory has no loop', r.factory.storms === 0]];
+    ['lacp fixed', r.lacpFixed.tests === '111111'], ['dhcp fixed', r.dhcpFixed.tests === '111111'], ['config round trip', r.roundTrip && r.rt2], ['backup restore', r.restore], ['pipe include', r.pipeOk],
+    ['ntp sync', r.ntp.includes('synchronized, stratum 5')], ['speed mismatch drops link', r.speedDown], ['speed auto restores link', r.speedUp], ['solved has no loop', r.solved.storms === 0], ['factory has no loop', r.factory.storms === 0]];
   for (const [n, ok] of extra) { if (!ok) fail++; console.log(`${ok ? 'PASS' : 'FAIL'} ${n}`); }
-  if (process.argv.includes('-v')) { console.log(r.factoryStp); console.log(r.show); console.log(r.acc); console.log(r.help); console.log(JSON.stringify(r.stormFixed)); console.log(r.dhcp0, '|', r.dhcp1, r.dhcp1t, '|', r.dhcp2); console.log(r.dhcpShow); }
+  if (process.argv.includes('-v')) { console.log(r.factoryStp); console.log(r.show); console.log(r.acc); console.log(r.help); console.log(JSON.stringify(r.stormFixed)); console.log(r.dhcp0, '|', r.dhcp1, r.dhcp1t, '|', r.dhcp2); console.log(r.dhcpShow); console.log(r.dir); console.log(r.pipe); console.log(r.ntp); console.log(r.misc); }
 
   // UI smoke test: log in, run a ping, open help
   await p.evaluate(() => { localStorage.clear(); loadScenario('storm'); active = 'SW1'; refresh(); });
   const t = async s => { await p.fill('#cmd', s); await p.press('#cmd', 'Enter'); };
   await t('manager'); await t('friend'); await t('en'); await t('show spanning-tree brief');
+  // remote sessions from CORE (solved lab)
+  await p.evaluate(() => { loadScenario('solved'); active = 'SW1'; refresh(); });
+  await t('manager'); await t('friend'); await t('en');
+  await t('telnet 192.168.99.2'); await t('manager'); await t('friend');
+  const p1 = await p.textContent('#prompt');
+  await t('show users'); await t('exit');
+  const p2 = await p.textContent('#prompt');
+  await t('ssh 192.168.99.3');
+  const p3 = await p.textContent('#out');
+  const remoteOk = p1 === 'ACCESS1>' && p2 === 'CORE#' && p3.includes('port 22: Connection refused');
+  console.log(`${remoteOk ? 'PASS' : 'FAIL'} telnet/ssh sessions (${p1} / ${p2})`); if (!remoteOk) fail++;
   await p.screenshot({ path: path.resolve(__dirname, 'shot.png') });
   if (errs.length) { fail++; console.log(errs.join('\n')); }
   console.log(fail ? `${fail} FAILED` : 'ALL PASSED');
