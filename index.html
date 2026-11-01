@@ -38,16 +38,33 @@ main{display:grid;grid-template-columns:minmax(330px,410px) 1fr;min-height:0}
 .rail{border-right:1px solid var(--line);overflow-y:auto;display:flex;flex-direction:column;min-height:0}
 .section{padding:12px 14px;border-bottom:1px solid var(--line)}
 .section h2{font:600 13px/1.2 var(--display);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
-#topo{width:100%;height:auto;display:block}
-#topo .dev{cursor:pointer}
-#topo .dev rect{fill:var(--panel-2);stroke:var(--line);stroke-width:1.2}
-#topo .dev.sw rect{fill:#1f3043}
-#topo .dev.active rect{stroke:var(--accent);stroke-width:2}
-#topo .dev:hover rect{stroke:var(--muted)}
-#topo text{fill:var(--text);font-family:var(--body)}
-#topo .sub{fill:var(--muted);font-size:8.5px;font-family:var(--mono)}
-#topo .pl{fill:var(--muted);font-size:7.5px;font-family:var(--mono)}
-#topo .vl{font-size:7.5px;font-family:var(--mono);fill:var(--accent)}
+.topo{width:100%;height:auto;display:block;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab}
+.topo.panning{cursor:grabbing}
+.topo .dev{cursor:pointer}
+.topo .dev rect{fill:var(--panel-2);stroke:var(--line);stroke-width:1.2}
+.topo .dev.sw rect{fill:#1f3043}
+.topo .dev.active rect{stroke:var(--accent);stroke-width:2}
+.topo .dev:hover rect{stroke:var(--muted)}
+.topo text{fill:var(--text);font-family:var(--body)}
+.topo .sub{fill:var(--muted);font-size:8.5px;font-family:var(--mono)}
+.topo .pl{fill:var(--muted);font-size:7.5px;font-family:var(--mono)}
+.topo .vl{font-size:7.5px;font-family:var(--mono);fill:var(--accent)}
+.topowrap{position:relative;border:1px solid var(--line);border-radius:8px;background:var(--term);overflow:hidden}
+.zoombar{position:absolute;top:6px;right:6px;display:flex;gap:4px;z-index:1}
+.zoombar button{min-width:28px;height:28px;padding:0 7px;border-radius:6px;background:var(--panel-2);border:1px solid var(--line);font-size:14px;line-height:1}
+.zoombar button:hover{border-color:var(--muted)}
+.zoombar.inline{position:static;margin-left:auto}
+.topohead{display:flex;align-items:center;gap:8px;margin:0 0 8px}
+.topohead h2{margin:0}
+.zoomhint{font-size:11px;color:var(--muted);white-space:nowrap}
+.topofull{position:fixed;inset:0;z-index:9;background:var(--bg);display:grid;grid-template-rows:auto 1fr auto}
+.topofull[hidden]{display:none}
+.topofull .bar{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
+.topofull .bar h2{font:700 17px/1 var(--display);margin:0;letter-spacing:.02em}
+.topofull .topowrap{margin:12px 16px 0;border-radius:10px;min-height:0;display:flex}
+.topofull .topo{flex:1;width:100%;height:auto;min-height:0;align-self:stretch}
+.topofull .legend{padding:8px 16px 12px}
+.topofull .msg{font-size:12.5px;color:var(--muted)}
 
 .tests{display:grid;gap:4px;margin:0;padding:0;list-style:none}
 .tests li{display:flex;gap:8px;align-items:center;font-size:13px}
@@ -127,8 +144,10 @@ footer{padding:6px 16px;font-size:11.5px;color:var(--muted);border-top:1px solid
 <main>
   <aside class="rail">
     <div class="section">
-      <h2>Topology</h2>
-      <svg id="topo" viewBox="0 0 360 300" role="img" aria-label="Lab topology: CORE switch with two links to ACCESS1 and one to ACCESS2, a cross link between the access switches, and a PC and a CCTV device on each access switch"></svg>
+      <div class="topohead"><h2>Topology</h2><span class="zoomhint">Scroll to zoom, drag to pan</span><div class="zoombar inline" data-for="topo"><button type="button" data-z="in" aria-label="Zoom in" title="Zoom in">+</button><button type="button" data-z="out" aria-label="Zoom out" title="Zoom out">&minus;</button><button type="button" data-z="reset" aria-label="Reset zoom" title="Reset zoom">&#x27F2;</button><button type="button" id="btnTopoFull" aria-label="Open large topology view" title="Open large view">&#x2922;</button></div></div>
+      <div class="topowrap">
+        <svg id="topo" class="topo" viewBox="0 0 360 300" role="img" aria-label="Lab topology: CORE switch with two links to ACCESS1 and one to ACCESS2, a cross link between the access switches, and a PC and a CCTV device on each access switch"></svg>
+      </div>
       <p class="legend"><span><i></i>Forwarding</span><span><i class="b"></i>Blocked by STP</span><span><i class="l"></i>LACP not bundled</span><span><i class="d"></i>Down</span></p>
     </div>
     <div class="section">
@@ -165,6 +184,17 @@ footer{padding:6px 16px;font-size:11.5px;color:var(--muted);border-top:1px solid
   <span>Independent training simulator. Not affiliated with or endorsed by Allied Telesis. AlliedWare Plus is a trademark of Allied Telesis, Inc.</span>
 </footer>
 
+<div class="topofull" id="topoFull" hidden role="dialog" aria-modal="true" aria-label="Topology, large view">
+  <div class="bar"><h2>Topology</h2><span class="msg">Live view. Click a device to jump to its console. Scroll or pinch to zoom, drag to pan.</span><span class="spacer"></span>
+    <span class="msg" id="popMsg"></span>
+    <button class="btn" type="button" id="btnTopoWin">Open in new window</button>
+    <button class="btn primary" type="button" id="btnTopoClose">Back to lab</button></div>
+  <div class="topowrap">
+    <div class="zoombar" data-for="topoBig"><button type="button" data-z="in" aria-label="Zoom in" title="Zoom in">+</button><button type="button" data-z="out" aria-label="Zoom out" title="Zoom out">&minus;</button><button type="button" data-z="reset" aria-label="Reset zoom" title="Reset zoom">&#x27F2;</button></div>
+    <svg id="topoBig" class="topo" viewBox="0 0 360 300" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Lab topology, large view"></svg>
+  </div>
+  <p class="legend"><span><i></i>Forwarding</span><span><i class="b"></i>Blocked by STP</span><span><i class="l"></i>LACP not bundled</span><span><i class="d"></i>Down</span></p>
+</div>
 <div class="modal" id="modal" hidden>
   <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="mTitle">
     <h2 id="mTitle"></h2>
@@ -1358,6 +1388,9 @@ function renderTopo(){
       `<text x="${f.x}" y="${f.y-2}" text-anchor="middle" font-size="${isSw?11:10}" font-weight="600">${esc(isSw?devLabel(id):id)}</text><text class="sub" x="${f.x}" y="${f.y+10}" text-anchor="middle">${esc(isSw?id+' · '+sub:sub)}</text>`+
       (root?`<text class="vl" x="${f.x+w/2+3}" y="${f.y-8}">ROOT</text>`:'')+`</g>`;}
   $('#topo').innerHTML=g;
+  if(!$('#topoFull').hidden)$('#topoBig').innerHTML=g;
+  if(popWin&&!popWin.closed){const t=popWin.document.getElementById('topo');if(t)t.innerHTML=g;}
+  topoSVG=g;
 }
 function renderChecks(){
   const net=buildNet();let warn='';
@@ -1444,6 +1477,54 @@ function submit(){
   if(res&&typeof res.then==='function'){s.busy=true;render();res.finally(()=>{s.busy=false;checkRemote(s);afterCommand();if(id===active)$('#cmd').focus();});}
   afterCommand();
 }
+let topoSVG='',popWin=null;
+// Zoom/pan for a topology SVG by rewriting its viewBox. Wheel/pinch zoom about the pointer, drag pans; a drag never counts as a device click.
+function makeZoom(svg,onPick=selectDev,W=360,H=300){
+  let vb={x:0,y:0,w:W,h:H};const MIN=W/5,MAX=W*1.5;
+  const apply=()=>svg.setAttribute('viewBox',`${vb.x.toFixed(2)} ${vb.y.toFixed(2)} ${vb.w.toFixed(2)} ${vb.h.toFixed(2)}`);
+  const toSvg=(cx,cy)=>{const r=svg.getBoundingClientRect(),s=Math.max(vb.w/r.width,vb.h/r.height),ox=(r.width*s-vb.w)/2,oy=(r.height*s-vb.h)/2;
+    return {x:vb.x-ox+(cx-r.left)*s,y:vb.y-oy+(cy-r.top)*s,s};};
+  const zoom=(f,cx,cy)=>{const nw=Math.min(MAX,Math.max(MIN,vb.w*f));f=nw/vb.w;if(f===1)return;
+    let px=vb.x+vb.w/2,py=vb.y+vb.h/2;if(cx!=null){const p=toSvg(cx,cy);px=p.x;py=p.y;}
+    vb={x:px-(px-vb.x)*f,y:py-(py-vb.y)*f,w:vb.w*f,h:vb.h*f};apply();};
+  const cmd=c=>{if(c==='in')zoom(1/1.25);else if(c==='out')zoom(1.25);else{vb={x:0,y:0,w:W,h:H};apply();}};
+  svg.addEventListener('wheel',e=>{e.preventDefault();zoom(Math.exp(e.deltaY*(e.deltaMode===1?0.05:0.0015)),e.clientX,e.clientY);},{passive:false});
+  const pts=new Map();let moved=false,pinch=0,start=null;
+  svg.addEventListener('pointerdown',e=>{if(e.button)return;pts.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    if(pts.size===1){moved=false;start={x:e.clientX,y:e.clientY};}
+    if(pts.size===2){const [a,b]=[...pts.values()];pinch=Math.hypot(a.x-b.x,a.y-b.y);}});
+  svg.addEventListener('pointermove',e=>{const p=pts.get(e.pointerId);if(!p)return;
+    if(pts.size===1){if(!moved&&Math.hypot(e.clientX-start.x,e.clientY-start.y)<4)return;
+      if(!moved){moved=true;try{svg.setPointerCapture(e.pointerId);}catch(_){}svg.classList.add('panning');}
+      const s=toSvg(0,0).s;vb.x-=(e.clientX-p.x)*s;vb.y-=(e.clientY-p.y)*s;apply();}
+    else if(pts.size===2){moved=true;const o=[...pts.entries()].find(([k])=>k!==e.pointerId)[1],d=Math.hypot(e.clientX-o.x,e.clientY-o.y);
+      if(pinch&&d)zoom(pinch/d,(e.clientX+o.x)/2,(e.clientY+o.y)/2);pinch=d;}
+    p.x=e.clientX;p.y=e.clientY;});
+  const up=e=>{pts.delete(e.pointerId);if(pts.size<2)pinch=0;if(!pts.size)svg.classList.remove('panning');
+    if(pts.size===1){const [q]=pts.values();start={x:q.x,y:q.y};}};
+  svg.addEventListener('pointerup',up);svg.addEventListener('pointercancel',up);
+  svg.addEventListener('click',e=>{if(moved){moved=false;return;}const g=e.target.closest('.dev');if(g)onPick(g.dataset.id);},true);
+  svg.addEventListener('keydown',e=>{const g=e.target.closest('.dev');if(g&&(e.key==='Enter'||e.key===' ')){e.preventDefault();onPick(g.dataset.id);}
+    else if(e.key==='+'||e.key==='=')cmd('in');else if(e.key==='-')cmd('out');else if(e.key==='0')cmd('reset');});
+  svg.addEventListener('dblclick',e=>{if(!e.target.closest('.dev'))zoom(1/1.6,e.clientX,e.clientY);});
+  return {cmd};
+}
+// Real pop-out window kept live by the main page. Returns false where popups are blocked (e.g. a sandboxed frame).
+function openTopoWindow(){
+  if(popWin&&!popWin.closed){popWin.focus();return true;}
+  let w=null;try{w=window.open('','awlab-topology','width=1100,height=820');}catch(_){w=null;}
+  if(!w)return false;
+  try{const d=w.document,css=[...document.querySelectorAll('style')].map(x=>x.textContent).join('\n');
+    d.open();d.write(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>AW+ Test Lab: topology</title><style>${css}
+body{display:grid;grid-template-rows:auto 1fr auto;height:100vh}</style></head><body><div class="topofull" style="position:static;height:100vh">
+<div class="bar"><h2>Topology</h2><span class="msg">Live view of the lab. Click a device to open its console in the lab window.</span></div>
+<div class="topowrap"><div class="zoombar"><button type="button" data-z="in" aria-label="Zoom in">+</button><button type="button" data-z="out" aria-label="Zoom out">&minus;</button><button type="button" data-z="reset" aria-label="Reset zoom">&#x27F2;</button></div>
+<svg id="topo" class="topo" viewBox="0 0 360 300" role="img" aria-label="Lab topology"></svg></div>
+<p class="legend"><span><i></i>Forwarding</span><span><i class="b"></i>Blocked by STP</span><span><i class="l"></i>LACP not bundled</span><span><i class="d"></i>Down</span></p></div></body></html>`);d.close();
+    const svg=d.getElementById('topo');svg.innerHTML=topoSVG;const z=makeZoom(svg);
+    d.querySelector('.zoombar').addEventListener('click',e=>{const b=e.target.closest('button[data-z]');if(b)z.cmd(b.dataset.z);});
+    popWin=w;return true;}catch(_){try{w.close();}catch(__){}return false;}
+}
 function boot(){
   if(!restore())loadScenario('factory');
   const inp=$('#cmd');
@@ -1463,8 +1544,13 @@ function boot(){
   });
   $('#term').addEventListener('click',()=>{if(!window.getSelection().toString())inp.focus();});
   $('#devtabs').addEventListener('click',e=>{const b=e.target.closest('button[data-id]');if(b)selectDev(b.dataset.id);});
-  $('#topo').addEventListener('click',e=>{const g=e.target.closest('.dev');if(g)selectDev(g.dataset.id);});
-  $('#topo').addEventListener('keydown',e=>{const g=e.target.closest('.dev');if(g&&(e.key==='Enter'||e.key===' ')){e.preventDefault();selectDev(g.dataset.id);}});
+  const zTopo=makeZoom($('#topo')),zBig=makeZoom($('#topoBig'),id=>{$('#topoFull').hidden=true;selectDev(id);});const Z={topo:zTopo,topoBig:zBig};
+  for(const bar of document.querySelectorAll('.zoombar'))bar.addEventListener('click',e=>{const b=e.target.closest('button[data-z]');if(b)Z[bar.dataset.for].cmd(b.dataset.z);});
+  $('#btnTopoFull').addEventListener('click',()=>{$('#topoFull').hidden=false;$('#popMsg').textContent='';$('#topoBig').innerHTML=topoSVG;zBig.cmd('reset');$('#btnTopoClose').focus();});
+  const closeFull=()=>{$('#topoFull').hidden=true;inp.focus();};
+  $('#btnTopoClose').addEventListener('click',closeFull);
+  $('#topoFull').addEventListener('keydown',e=>{if(e.key==='Escape')closeFull();});
+  $('#btnTopoWin').addEventListener('click',()=>{if(openTopoWindow())closeFull();else $('#popMsg').textContent='This page is not allowed to open new windows here, so use this large view instead.';});
   document.querySelector('.tabs').addEventListener('click',e=>{const b=e.target.closest('button[role=tab]');if(!b)return;
     for(const t of document.querySelectorAll('.tabs button')){const on=t===b;t.setAttribute('aria-selected',on);$('#'+t.getAttribute('aria-controls')).hidden=!on;}});
   let armed=null;
