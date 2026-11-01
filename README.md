@@ -97,4 +97,4 @@ The engine test loads every scenario and confirms the expected pass/fail pattern
 
 ## Credits
 
-© 2026 Rikki Keene. Independent training simulator, not affiliated with or endorsed by Allied Telesis.
+Independent AI Crafted training simulator, not affiliated with or endorsed by Allied Telesis.
