@@ -1,6 +1,6 @@
 # AW+ Test Lab
 
-**Practise AlliedWare Plus style switch configuration in your browser.** Three switches, four end devices, real CLI behaviour and live connectivity checks, all in one self-contained `index.html`. No install, no server, no switch images.
+**Practise AlliedWare Plus style switch configuration in your browser.** Three switches, four end devices, real CLI behaviour and live connectivity checks, plus a sandbox where you add and cable your own equipment, all in one self-contained `index.html`. No install, no server, no switch images.
 
 **[▶ Open the live lab](https://claude.ai/artifact/6iULQJ7CAKa4VqzqzrBqWJ)** &nbsp;·&nbsp; or download `index.html` and open it in any modern browser.
 
@@ -73,6 +73,18 @@ Switch login: `manager` / `friend`
 - **Exercises:** 13 guided tasks that build a Data (VLAN 10), CCTV (VLAN 20) and Management (VLAN 99) design, then make CORE the root bridge, bundle the ACCESS1 uplinks with LACP, set edge ports, lock the cameras down with an ACL and hand out addresses by DHCP. Each is checked live.
 - **Fault tickets:** pre-broken labs to troubleshoot (CCTV outage, PC offline, unmanageable switch, site-wide broadcast storm, LACP bundle down, camera with no DHCP address), plus a completed reference lab.
 - **Live connectivity:** six reachability checks update after every command.
+
+## Sandbox
+
+Press **Sandbox** in the header to build your own network, kept separate from the exercises and fault tickets (press **Back to lessons** to return; both keep their own saved state).
+
+- **Add equipment:** x530-28GTXm, x230-18GP and x230-10GP switches, plus workstations, IP cameras, NVRs and servers. Up to 32 devices.
+- **Cable it:** pick a free port at each end and press **Connect**; **Unplug** removes a cable. Hosts plug into switches.
+- **Arrange it:** drag devices around the topology diagram; zoom and the large view work as usual.
+- **Configure it:** every device gets its own console with the full CLI and host shell, so spanning tree, LACP, routing, DHCP, ACLs and loop detection all work on whatever you build.
+- **Start over** from a factory-default copy of the standard topology or an empty bench. **Reset all configs** wipes configs but keeps equipment and cabling. **Export** saves the equipment, layout, cabling and configs; importing that file reopens the sandbox.
+
+![Sandbox with an extra x230-18GP switch and workstation cabled into the standard topology](docs/screenshots/sandbox.png)
 
 Progress is kept in the browser's local storage. Use **Export lab** / **Import lab** to move a lab between machines.
 

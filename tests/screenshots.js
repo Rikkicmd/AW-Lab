@@ -32,4 +32,11 @@ await p.evaluate(()=>{localStorage.clear();loadScenario('factory');active='SW1';
 await p.click('#tab-ex');
 for(const c of ['enable','configure terminal','hostname CORE','vlan database','vlan 10 name Data','vlan 20 name CCTV','vlan 99 name Mgmt','exit','interface vlan10','ip address 192.168.10.1/24','no shutdown','exit','interface port1.0.2']) await t(c);await p.fill('#cmd','switchport mode ');await p.press('#cmd','?');await p.waitForTimeout(150);
 await p.screenshot({path:out+'/cli-config.png'});
+// 6 sandbox: extra switch and PC cabled into the standard topology
+await p.evaluate(()=>{localStorage.clear();loadScenario('factory');save();enterSandbox();sbAddDevice('x230-18GP');sbAddDevice('PC');sbAddDevice('CAM');
+  sbConnect('SW1','port1.0.5','SW4','port1.0.18');sbConnect('SW4','port1.0.1','PC3','eth0');Object.assign(D.SW4.def,{x:390,y:146});Object.assign(D.PC3.def,{x:390,y:258});D.CAM2.def.x=480;D.CAM2.def.y=258;
+  applyModeUI();fitTopo();active='SW4';afterCommand();});await clear();
+for(const c of ['enable','show interface brief']) await t(c);
+await p.screenshot({path:out+'/sandbox.png'});
+await p.evaluate(()=>{exitSandbox();applyModeUI();refresh();});
 console.log(errs);await b.close();})();

@@ -123,6 +123,35 @@ const EXPECT = {
   const p3 = await p.textContent('#out');
   const remoteOk = p1 === 'ACCESS1>' && p2 === 'CORE#' && p3.includes('port 22: Connection refused');
   console.log(`${remoteOk ? 'PASS' : 'FAIL'} telnet/ssh sessions (${p1} / ${p2})`); if (!remoteOk) fail++;
+  // sandbox: add equipment, cable it, configure it, remove it; the lessons lab must be untouched
+  const sb = await p.evaluate(() => {
+    const run = (id, cmds) => { const s = { buf: [], mode: 'priv', login: 'ok', ifSel: null, pending: null, sink: [] }; for (const c of cmds) execLine(D[id], s, c); return s.sink.join('\n'); };
+    const r = {};
+    localStorage.clear(); loadScenario('solved'); save();
+    enterSandbox();
+    r.start = Object.keys(D).join(',') === 'SW1,SW2,SW3,PC1,CAM1,PC2,NVR1' && LINKS.length === 8 && D.SW1.cfg.hostname === 'awplus';
+    const sw = sbAddDevice('x230-18GP').id, pc = sbAddDevice('PC').id, cam = sbAddDevice('CAM').id;
+    r.ids = sw === 'SW4' && pc === 'PC3' && cam === 'CAM2' && D.SW4.def.nports === 18;
+    r.cable = sbConnect('SW1', 'port1.0.5', sw, 'port1.0.18') === null && sbConnect(sw, 'port1.0.1', pc, 'eth0') === null;
+    r.refuse = !!sbConnect(sw, 'port1.0.1', cam, 'eth0') && !!sbConnect(pc, 'eth0', cam, 'eth0') && !!sbConnect(sw, 'port1.0.19', cam, 'eth0');
+    run('SW1', ['configure terminal', 'interface vlan1', 'ip address 10.0.0.1/24']);
+    Object.assign(D[pc].cfg, { ip: '10.0.0.5', len: 24, gw: '10.0.0.1' }); invalidate();
+    r.ping = reach(pc, '10.0.0.1');
+    r.ver = run(sw, ['show version']).includes('x230-18GP');
+    r.lldp = run('SW1', ['configure terminal', 'lldp run', 'end', 'show lldp neighbors']);
+    const exp = JSON.stringify(snapshot());
+    sbRemoveDevice(sw); invalidate();
+    r.removed = !D[sw] && !reach(pc, '10.0.0.1') && LINKS.every(l => l.a[0] !== sw && l.b[0] !== sw);
+    exitSandbox(); invalidate();
+    r.lab = mode === 'lab' && Object.keys(D).length === 7 && TESTS.every(testOk) && D.SW1.cfg.hostname === 'CORE';
+    enterSandbox();
+    r.persist = !!D[pc] && !D[sw];
+    applySnapshot(JSON.parse(exp)); invalidate();
+    r.import = mode === 'sandbox' && !!D[sw] && reach(pc, '10.0.0.1');
+    exitSandbox(); refresh();
+    return r;
+  });
+  for (const k of ['start', 'ids', 'cable', 'refuse', 'ping', 'ver', 'removed', 'lab', 'persist', 'import']) { const ok = !!sb[k]; if (!ok) fail++; console.log(`${ok ? 'PASS' : 'FAIL'} sandbox ${k}`); }
   await p.screenshot({ path: path.resolve(__dirname, 'shot.png') });
   if (errs.length) { fail++; console.log(errs.join('\n')); }
   console.log(fail ? `${fail} FAILED` : 'ALL PASSED');

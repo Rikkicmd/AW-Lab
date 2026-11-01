@@ -70,11 +70,32 @@ main{display:grid;grid-template-columns:minmax(330px,410px) 1fr;min-height:0}
 .tests li{display:flex;gap:8px;align-items:center;font-size:13px}
 .dot{width:9px;height:9px;border-radius:50%;flex:none;background:var(--bad)}
 .dot.ok{background:var(--ok)}
+.dot.amber{background:var(--accent)}
 .tests li.warn{background:rgba(227,88,78,.12);border:1px solid var(--bad);border-radius:6px;padding:6px 8px;align-items:flex-start}
 .tests li.warn b{color:#ffb3ad}
 .legend{display:flex;gap:12px;flex-wrap:wrap;margin:6px 0 0;font-size:11.5px;color:var(--muted)}
 .legend i{display:inline-block;width:18px;height:0;border-top:2px solid var(--ok);vertical-align:middle;margin-right:4px}
 .legend i.b{border-top:2px dashed var(--accent)}.legend i.l{border-top:2px dotted var(--accent)}.legend i.d{border-top:2px dashed var(--bad)}
+.sbrow{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:8px 0 0}
+.sbrow label,.sblab{font-size:12.5px;color:var(--muted);min-width:38px}
+select{background:var(--term);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:5px 6px;font:12.5px var(--body);min-width:0}
+#sbType{flex:1}
+.sbcable{display:grid;grid-template-columns:38px 1fr auto 1fr;gap:6px;align-items:center;margin:8px 0 0}
+.sbcable .sbend{display:grid;gap:4px}
+.sbcable .sbto{color:var(--muted)}
+.sbcable #sbConnect{grid-column:2/5;justify-self:start}
+.sbintro{margin:0}
+#sbMsg{margin:6px 0 0;min-height:1.2em}
+#sbMsg.err{color:#ffb3ad}
+.sbh{font:600 12px/1.2 var(--display);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:10px 0 4px}
+.sblist{list-style:none;margin:0;padding:0;display:grid;gap:3px}
+.sblist li{display:flex;gap:8px;align-items:center;font-size:12.5px;padding:3px 0;border-bottom:1px solid var(--line)}
+.sblist li .nm{font-weight:600}
+.sblist li .meta{color:var(--muted);font-family:var(--mono);font-size:11.5px;overflow-wrap:anywhere}
+.sblist li button{margin-left:auto;padding:2px 8px;font-size:12px}
+.sblist li.empty{color:var(--muted);border:0}
+.btn.small{padding:2px 8px;font-size:12px}
+#btnMode[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
 .tests .ip{font-family:var(--mono);font-size:12px;color:var(--muted);margin-left:auto}
 
 .tabs{display:flex;gap:2px;padding:0 14px;border-bottom:1px solid var(--line);background:var(--panel)}
@@ -136,6 +157,7 @@ footer{padding:6px 16px;font-size:11.5px;color:var(--muted);border-top:1px solid
   <h1>AW<span>+</span> Test Lab</h1>
   <span class="chip">Lab: <b id="scenName">Factory default</b></span>
   <span class="spacer"></span>
+  <button class="btn" id="btnMode" type="button" aria-pressed="false" title="Build your own network with as much equipment as you like">Sandbox</button>
   <button class="btn" id="btnExport" type="button">Export lab</button>
   <button class="btn" id="btnImport" type="button">Import lab</button>
   <button class="btn warn" id="btnReset" type="button">Reset to factory</button>
@@ -150,7 +172,24 @@ footer{padding:6px 16px;font-size:11.5px;color:var(--muted);border-top:1px solid
       </div>
       <p class="legend"><span><i></i>Forwarding</span><span><i class="b"></i>Blocked by STP</span><span><i class="l"></i>LACP not bundled</span><span><i class="d"></i>Down</span></p>
     </div>
-    <div class="section">
+    <div class="section" id="sbPanel" hidden>
+      <h2>Sandbox</h2>
+      <ul class="tests" id="sbWarn"></ul>
+      <p class="msg sbintro">Your own network, kept apart from the lessons. Add equipment, cable it up, then configure it in the console. Drag devices on the diagram to tidy it.</p>
+      <div class="sbrow"><label for="sbType">Add</label><select id="sbType"></select><button class="btn primary" type="button" id="sbAdd">Add device</button></div>
+      <div class="sbcable">
+        <span class="sblab">Cable</span>
+        <div class="sbend"><select id="sbA" aria-label="Cable end A: device"></select><select id="sbPA" aria-label="Cable end A: port"></select></div>
+        <span class="sbto" aria-hidden="true">&harr;</span>
+        <div class="sbend"><select id="sbB" aria-label="Cable end B: device"></select><select id="sbPB" aria-label="Cable end B: port"></select></div>
+        <button class="btn" type="button" id="sbConnect">Connect</button>
+      </div>
+      <p class="msg" id="sbMsg" role="status"></p>
+      <h3 class="sbh">Equipment</h3><ul class="sblist" id="sbDevs"></ul>
+      <h3 class="sbh">Cables</h3><ul class="sblist" id="sbLinks"></ul>
+      <div class="sbrow sbstart"><span class="msg">Start over:</span><button class="btn" type="button" id="sbStd">Standard topology</button><button class="btn" type="button" id="sbEmpty">Empty bench</button></div>
+    </div>
+    <div class="section" id="secTests">
       <h2>Live connectivity</h2>
       <ul class="tests" id="tests"></ul>
     </div>
@@ -270,7 +309,50 @@ function normalizeCfg(def,cfg){ // upgrade labs saved by v1
   for(const a of Object.values(cfg.aggs)){a.stp=Object.assign({edge:false,cost:null,prio:128},a.stp||{});if(a.acl===undefined)a.acl=null;}
   return cfg;
 }
-for(const def of DEFS)D[def.id]={def,cfg:factoryCfg(def),startup:null,boot:Date.now(),leases:{},files:{},log:[],clockOff:0};
+const freshDev=def=>({def,cfg:factoryCfg(def),startup:null,boot:Date.now(),leases:{},files:{},log:[],clockOff:0});
+for(const def of DEFS)D[def.id]=freshDev(def);
+
+/* ================= Sandbox: user-built topology ================= */
+// The lab world (DEFS/LINKS/D) is swapped in place, so the whole engine works unchanged on sandbox equipment.
+// Lessons and fault tickets only ever run on the standard topology; the sandbox is kept under its own storage key.
+const STD_DEFS=clone(DEFS),STD_LINKS=clone(LINKS);
+let mode='lab';
+const MODELS=[{model:'x530-28GTXm',nports:28,note:'28-port core/distribution'},{model:'x230-18GP',nports:18,note:'18-port PoE access'},{model:'x230-10GP',nports:10,note:'10-port PoE access'}];
+const HOSTTYPES=[{pre:'PC',role:'Workstation'},{pre:'CAM',role:'IP camera'},{pre:'NVR',role:'NVR'},{pre:'SRV',role:'Server'}];
+const SB_MAX=32;
+function setWorld(defs,links){DEFS.length=0;DEFS.push(...clone(defs));LINKS.length=0;LINKS.push(...clone(links));
+  for(const k in D)delete D[k];for(const k in S)delete S[k];for(const def of DEFS)D[def.id]=freshDev(def);}
+const devPorts=id=>D[id].def.kind==='switch'?portNames(D[id].def):['eth0'];
+const freePorts=id=>devPorts(id).filter(p=>!linkAt(id,p));
+function nextId(pre){let n=1;while(D[pre+n])n++;return pre+n;}
+function uniqueMac(kind){const used=new Set(DEFS.map(d=>d.mac));
+  for(let n=1;;n++){const m=kind==='switch'?'0000.cd3b.'+(n*0x100).toString(16).padStart(4,'0'):'0050.7966.'+(0x7000+n).toString(16);if(!used.has(m))return m;}}
+function findSpot(kind){const clear=(x,y)=>DEFS.every(d=>Math.abs(d.x-x)>=105||Math.abs(d.y-y)>=46);
+  for(let j=kind==='switch'?0:2;j<12;j++)for(let i=0;i<4;i++){const x=60+110*i,y=40+106*j;if(clear(x,y))return [x,y];}
+  return [60+Math.random()*330,40+106*12];}
+function sbAddDevice(type){
+  if(DEFS.length>=SB_MAX)return {err:`The sandbox holds up to ${SB_MAX} devices.`};
+  const m=MODELS.find(x=>x.model===type),h=HOSTTYPES.find(x=>x.pre===type);if(!m&&!h)return {err:'Unknown device type'};
+  const kind=m?'switch':'host',id=nextId(m?'SW':h.pre),[x,y]=findSpot(kind);
+  const def=m?{id,kind,model:m.model,nports:m.nports,mac:uniqueMac(kind),x,y}:{id,kind,role:h.role,mac:uniqueMac(kind),ip:null,len:null,gw:null,x,y};
+  DEFS.push(def);D[id]=freshDev(def);S[id]=newSession(id);if(kind==='switch')seedLog(D[id]);invalidate();return {id};
+}
+function sbRemoveDevice(id){if(!D[id])return;
+  for(let i=LINKS.length-1;i>=0;i--)if(LINKS[i].a[0]===id||LINKS[i].b[0]===id)LINKS.splice(i,1);
+  DEFS.splice(DEFS.findIndex(d=>d.id===id),1);delete D[id];delete S[id];
+  for(const k in S)if(S[k].remote&&S[k].remote.id===id){out(S[k],`Connection to ${S[k].remote.ip} closed by foreign host.`);S[k].remote=null;}
+  for(const k in D)if(D[k].leases)for(const m in D[k].leases)if(!DEFS.some(d=>d.mac===m))delete D[k].leases[m];
+  invalidate();}
+function sbConnect(a,pa,b,pb){
+  if(!D[a]||!D[b])return 'Pick a device at each end.';if(a===b)return 'A cable needs two different devices.';
+  if(!devPorts(a).includes(pa)||!devPorts(b).includes(pb))return 'Pick a port at each end.';
+  if(linkAt(a,pa))return `${a} ${pa} already has a cable.`;if(linkAt(b,pb))return `${b} ${pb} already has a cable.`;
+  if(D[a].def.kind==='host'&&D[b].def.kind==='host')return 'Connect hosts to a switch, not to each other.';
+  LINKS.push({a:[a,pa],b:[b,pb]});invalidate();return null;}
+function sbDisconnect(i){if(LINKS[i]){LINKS.splice(i,1);invalidate();}}
+function newSandbox(kind){setWorld(kind==='standard'?STD_DEFS:[],kind==='standard'?STD_LINKS:[]);
+  for(const id in D){S[id]=newSession(id);if(D[id].def.kind==='switch')seedLog(D[id]);}LAST=null;invalidate();}
+function sbFactoryAll(){for(const id in D){D[id]=freshDev(D[id].def);S[id]=newSession(id);if(D[id].def.kind==='switch')seedLog(D[id]);}LAST=null;invalidate();}
 
 /* ================= L2 / L3 engine ================= */
 const CACHE={};
@@ -1343,20 +1425,39 @@ const EXERCISES=[
 ];
 
 /* ================= Persistence ================= */
-const KEY='awplus-testlab-v1';
-function snapshot(){const o={v:1,scenario:currentScen,devices:{}};for(const id in D)o.devices[id]={cfg:D[id].cfg,startup:D[id].startup,leases:D[id].leases,files:D[id].files,clockOff:D[id].clockOff||0};return o;}
+const KEY='awplus-testlab-v1',SBKEY='awplus-testlab-sandbox-v1',MODEKEY='awplus-testlab-mode';
+function snapshot(){const o={v:1,scenario:currentScen,devices:{}};for(const id in D)o.devices[id]={cfg:D[id].cfg,startup:D[id].startup,leases:D[id].leases,files:D[id].files,clockOff:D[id].clockOff||0};
+  if(mode==='sandbox'){o.mode='sandbox';o.scenario='sandbox';o.defs=clone(DEFS);o.links=clone(LINKS);}return o;}
+function checkSandbox(o){if(!Array.isArray(o.defs)||!Array.isArray(o.links))throw new Error('Sandbox export is missing its equipment list');const ids=new Set();
+  for(const d of o.defs){if(!d||typeof d.id!=='string'||!/^[A-Za-z0-9]{1,12}$/.test(d.id)||ids.has(d.id))throw new Error('Bad device id in sandbox export');ids.add(d.id);
+    if(d.kind==='switch'){if(!MODELS.some(m=>m.model===d.model&&m.nports===d.nports))throw new Error('Unknown switch model '+d.model);}else if(d.kind!=='host')throw new Error('Bad device '+d.id);
+    if(!isFinite(d.x)||!isFinite(d.y)||typeof d.mac!=='string')throw new Error('Bad device '+d.id);}
+  const used=new Set(),port=(e)=>{if(!Array.isArray(e)||!ids.has(e[0]))return false;const d=o.defs.find(x=>x.id===e[0]);const ok=d.kind==='switch'?portNames(d).includes(e[1]):e[1]==='eth0';const k=e.join(' ');if(!ok||used.has(k))return false;used.add(k);return true;};
+  for(const l of o.links)if(!l||!port(l.a)||!port(l.b)||l.a[0]===l.b[0])throw new Error('Bad cable in sandbox export');
+  if(o.defs.length>SB_MAX)throw new Error(`Too many devices (max ${SB_MAX})`);}
 function applySnapshot(o){if(!o||o.v!==1||!o.devices)throw new Error('Not an AW+ Test Lab export');
-  for(const id in D){const x=o.devices[id];if(!x||!x.cfg)throw new Error('Missing device '+id);}
+  const sb=o.mode==='sandbox';
+  if(sb)checkSandbox(o);else for(const def of STD_DEFS){const x=o.devices[def.id];if(!x||!x.cfg)throw new Error('Missing device '+def.id);}
+  if(sb){for(const d of o.defs){const x=o.devices[d.id];if(!x||!x.cfg)throw new Error('Missing device '+d.id);}setWorld(o.defs,o.links);mode='sandbox';}
+  else if(mode!=='lab'||DEFS.length!==STD_DEFS.length){setWorld(STD_DEFS,STD_LINKS);mode='lab';}
   for(const id in D){D[id].cfg=normalizeCfg(D[id].def,clone(o.devices[id].cfg));D[id].startup=o.devices[id].startup?normalizeCfg(D[id].def,clone(o.devices[id].startup)):null;D[id].boot=Date.now();D[id].leases=o.devices[id].leases||{};D[id].files=o.devices[id].files||{};D[id].clockOff=o.devices[id].clockOff||0;S[id]=newSession(id);if(D[id].def.kind==='switch')seedLog(D[id]);}LAST=null;
-  currentScen=SCENARIOS[o.scenario]?o.scenario:'factory';invalidate();}
-function save(){try{localStorage.setItem(KEY,JSON.stringify(snapshot()));}catch(e){}}
-function restore(){try{const t=localStorage.getItem(KEY);if(t){applySnapshot(JSON.parse(t));return true;}}catch(e){}return false;}
+  currentScen=sb?'sandbox':SCENARIOS[o.scenario]?o.scenario:'factory';invalidate();}
+function save(){try{localStorage.setItem(mode==='sandbox'?SBKEY:KEY,JSON.stringify(snapshot()));localStorage.setItem(MODEKEY,mode);}catch(e){}}
+function restoreKey(k){try{const t=localStorage.getItem(k);if(t){applySnapshot(JSON.parse(t));return true;}}catch(e){}return false;}
+function restore(){let m='lab';try{m=localStorage.getItem(MODEKEY)||'lab';}catch(e){}if(m==='sandbox'&&restoreKey(SBKEY))return true;mode='lab';return restoreKey(KEY);}
+// Switch between the lessons lab and the sandbox. Each keeps its own saved state, so nothing is lost either way.
+function enterSandbox(){if(mode==='sandbox')return;save();mode='sandbox';
+  if(!restoreKey(SBKEY)){mode='sandbox';newSandbox('standard');currentScen='sandbox';}
+  active=Object.keys(D)[0]||null;save();}
+function exitSandbox(){if(mode==='lab')return;save();mode='lab';setWorld(STD_DEFS,STD_LINKS);
+  if(!restoreKey(KEY))loadScenario('factory');mode='lab';active='SW1';save();}
 
 /* ================= UI ================= */
 let active='SW1';
 const $=s=>document.querySelector(s);
 const esc=t=>String(t).replace(/[&<>"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
 function render(){
+  if(!S[active]){$('#out').textContent=mode==='sandbox'?'The sandbox is empty. Add a switch or host from the Sandbox panel to start.\n':'';$('#prompt').textContent='';$('#cmd').disabled=true;return;}
   const s=S[active];$('#out').textContent=s.buf.join('\n')+(s.buf.length?'\n':'');
   const inp=$('#cmd');$('#prompt').textContent=s.busy?'':promptOf(active);const es=effOf(active).s;inp.type=(es.login==='pass'&&!es.pending)?'password':'text';inp.disabled=s.busy;
   const t=$('#term');t.scrollTop=t.scrollHeight;
@@ -1392,7 +1493,10 @@ function renderTopo(){
   if(popWin&&!popWin.closed){const t=popWin.document.getElementById('topo');if(t)t.innerHTML=g;}
   topoSVG=g;
 }
+function stormWarn(net){if(!net.storms.length)return '';const devs=new Set(),vl=new Set();for(const comp of net.storms)for(const n of comp){const [id,v]=n.split('|');if(D[id].def.kind==='switch'){devs.add(devLabel(id));vl.add(+v);}}
+  return `<li class="warn"><span class="dot" aria-hidden="true"></span><span><b>Loop detected:</b> broadcast storm in VLAN ${fmtVlans([...vl])} across ${[...devs].join(', ')}. Traffic in those VLANs is failing.</span></li>`;}
 function renderChecks(){
+  if(mode==='sandbox')return renderSandbox();
   const net=buildNet();let warn='';
   if(net.storms.length){const devs=new Set(),vl=new Set();for(const comp of net.storms)for(const n of comp){const [id,v]=n.split('|');if(D[id].def.kind==='switch'){devs.add(devLabel(id));vl.add(+v);}}
     warn=`<li class="warn"><span class="dot" aria-hidden="true"></span><span><b>Loop detected:</b> broadcast storm in VLAN ${fmtVlans([...vl])} across ${[...devs].join(', ')}. Traffic in those VLANs is failing.</span></li>`;}
@@ -1435,6 +1539,42 @@ const REF=[
   ['VLAN interface',[['ip address 192.168.10.1/24','Address (prefix notation)'],['no ip address',''],['shutdown / no shutdown','']]],
   ['Host shell (PCs, CAM1, NVR1)',[['ip 192.168.10.11/24 192.168.10.1','Address and gateway'],['show','Current settings'],['dhcp','Get an address from a DHCP server'],['ping / trace A.B.C.D','Test'],['clear ip','Remove address']]],
 ];
+/* ---- sandbox panel ---- */
+function sbMsg(t,err){const m=$('#sbMsg');m.textContent=t||'';m.classList.toggle('err',!!err);}
+function devOpt(id,sel){const d=D[id],hn_=d.def.kind==='switch'&&d.cfg.hostname!=='awplus'?` (${d.cfg.hostname})`:'';return `<option value="${esc(id)}"${id===sel?' selected':''}>${esc(id+hn_)}</option>`;}
+function fillPorts(selDev,selPort){const el=$(selPort),id=$(selDev).value,cur=el.value,fr=D[id]?freePorts(id):[];
+  el.innerHTML=fr.length?fr.map(p=>`<option${p===cur?' selected':''}>${p}</option>`).join(''):'<option value="">no free port</option>';el.disabled=!fr.length;}
+const LTEXT={up:'forwarding',blocked:'blocked by STP',nolacp:'LACP not bundled',down:'down'};
+function renderSandbox(){
+  const net=buildNet(),ids=Object.keys(D);
+  $('#scenName').textContent='Sandbox';
+  $('#sbWarn').innerHTML=stormWarn(net);
+  const ty=$('#sbType');if(!ty.options.length)ty.innerHTML='<optgroup label="Switches">'+MODELS.map(m=>`<option value="${m.model}">${m.model} switch, ${m.note}</option>`).join('')+
+    '</optgroup><optgroup label="End devices">'+HOSTTYPES.map(h=>`<option value="${h.pre}">${h.role} (${h.pre})</option>`).join('')+'</optgroup>';
+  const withFree=ids.filter(id=>freePorts(id).length);let a=$('#sbA').value,b=$('#sbB').value;
+  if(!D[a])a=withFree[0]||ids[0]||'';if(!D[b]||b===a)b=withFree.find(x=>x!==a)||ids.find(x=>x!==a)||'';
+  $('#sbA').innerHTML=ids.map(id=>devOpt(id,a)).join('');$('#sbB').innerHTML=ids.map(id=>devOpt(id,b)).join('');
+  fillPorts('#sbA','#sbPA');fillPorts('#sbB','#sbPB');$('#sbConnect').disabled=ids.length<2;
+  $('#sbDevs').innerHTML=ids.length?ids.map(id=>{const d=D[id],sw_=d.def.kind==='switch';let meta;
+    if(sw_){const used=devPorts(id).length-freePorts(id).length;meta=`${d.def.model} · ${used}/${d.def.nports} ports cabled`;}
+    else{const c=d.cfg;meta=`${d.def.role} · ${c.ip?c.ip+'/'+c.len:'no IP'}${c.ip&&c.gw?' · gateway '+(reach(id,c.gw)?'reachable':'unreachable'):''}${linkAt(id,'eth0')?'':' · not cabled'}`;}
+    return `<li><button class="btn small" type="button" data-open="${esc(id)}" title="Open console">${esc(sw_?id+' '+d.cfg.hostname:id)}</button><span class="meta">${esc(meta)}</span><button class="btn small warn" type="button" data-del="${esc(id)}">Remove</button></li>`;}).join('')
+    :'<li class="empty">No equipment yet. Add a switch to begin.</li>';
+  $('#sbLinks').innerHTML=LINKS.length?LINKS.map((l,i)=>{const st=linkState(l);return `<li><span class="dot ${st==='up'?'ok':st==='down'?'':'amber'}" aria-hidden="true"></span><span class="meta">${esc(l.a[0]+' '+l.a[1].replace('port','')+' ↔ '+l.b[0]+' '+l.b[1].replace('port',''))} · ${LTEXT[st]}</span><button class="btn small" type="button" data-unplug="${i}">Unplug</button></li>`;}).join('')
+    :'<li class="empty">No cables yet.</li>';
+}
+function selectTab(id){for(const t of document.querySelectorAll('.tabs button')){const on=t.id===id;t.setAttribute('aria-selected',on);$('#'+t.getAttribute('aria-controls')).hidden=!on;}}
+function applyModeUI(){const sb=mode==='sandbox';$('#sbPanel').hidden=!sb;$('#secTests').hidden=sb;$('#tab-ex').hidden=sb;$('#tab-ft').hidden=sb;
+  selectTab(sb?'tab-ref':'tab-ex');
+  const bm=$('#btnMode');bm.textContent=sb?'Back to lessons':'Sandbox';bm.setAttribute('aria-pressed',String(sb));
+  $('.zoomhint').textContent=sb?'Scroll to zoom, drag a device to move it':'Scroll to zoom, drag to pan';
+  $('#btnReset').textContent=sb?'Reset all configs':'Reset to factory';
+  $('#topo').setAttribute('aria-label',sb?'Sandbox topology: the equipment and cables you have added':TOPO_LABEL);}
+const TOPO_LABEL='Lab topology: CORE switch with two links to ACCESS1 and one to ACCESS2, a cross link between the access switches, and a PC and a CCTV device on each access switch';
+function topoHome(){if(mode!=='sandbox'||!DEFS.length)return {x:0,y:0,w:360,h:300};
+  let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;for(const d of DEFS){x0=Math.min(x0,d.x-62);x1=Math.max(x1,d.x+62);y0=Math.min(y0,d.y-34);y1=Math.max(y1,d.y+34);}
+  let w=Math.max(360,x1-x0),h=Math.max(300,y1-y0);if(w/h>1.2)h=w/1.2;else w=h*1.2;const cx=(x0+x1)/2,cy=(y0+y1)/2;return {x:cx-w/2,y:cy-h/2,w,h};}
+const ZOOMS=[];const fitTopo=()=>{for(const z of ZOOMS)z.cmd('reset');};
 function renderRef(){$('#pane-ref').innerHTML=REF.map(([h,rows])=>`<h3>${h}</h3><table>${rows.map(r=>`<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td></tr>`).join('')}</table>`).join('')+
   '<p class="msg">Commands can be shortened (<code>conf t</code>, <code>sh ip int br</code>, <code>sw mo tr</code>). Press <kbd>?</kbd> anywhere for context help.</p>';}
 let LAST=null;
@@ -1466,6 +1606,7 @@ function handleLine(d,s,v){
 }
 function checkRemote(s){if(s.remote&&s.remote.sess.closed){out(s,`Connection to ${s.remote.ip} closed.`);s.remote=null;}}
 function submit(){
+  if(!S[active])return;
   const s=S[active],inp=$('#cmd'),v=inp.value;inp.value='';
   if(s.busy)return;
   const {d:ed,s:es}=effOf(active);
@@ -1479,35 +1620,38 @@ function submit(){
 }
 let topoSVG='',popWin=null;
 // Zoom/pan for a topology SVG by rewriting its viewBox. Wheel/pinch zoom about the pointer, drag pans; a drag never counts as a device click.
-function makeZoom(svg,onPick=selectDev,W=360,H=300){
-  let vb={x:0,y:0,w:W,h:H};const MIN=W/5,MAX=W*1.5;
+function makeZoom(svg,onPick=selectDev){
+  let vb=topoHome(),drag=null;
   const apply=()=>svg.setAttribute('viewBox',`${vb.x.toFixed(2)} ${vb.y.toFixed(2)} ${vb.w.toFixed(2)} ${vb.h.toFixed(2)}`);
   const toSvg=(cx,cy)=>{const r=svg.getBoundingClientRect(),s=Math.max(vb.w/r.width,vb.h/r.height),ox=(r.width*s-vb.w)/2,oy=(r.height*s-vb.h)/2;
     return {x:vb.x-ox+(cx-r.left)*s,y:vb.y-oy+(cy-r.top)*s,s};};
-  const zoom=(f,cx,cy)=>{const nw=Math.min(MAX,Math.max(MIN,vb.w*f));f=nw/vb.w;if(f===1)return;
+  const zoom=(f,cx,cy)=>{const hw=topoHome().w,MIN=hw/5,MAX=hw*1.5;const nw=Math.min(MAX,Math.max(MIN,vb.w*f));f=nw/vb.w;if(f===1)return;
     let px=vb.x+vb.w/2,py=vb.y+vb.h/2;if(cx!=null){const p=toSvg(cx,cy);px=p.x;py=p.y;}
     vb={x:px-(px-vb.x)*f,y:py-(py-vb.y)*f,w:vb.w*f,h:vb.h*f};apply();};
-  const cmd=c=>{if(c==='in')zoom(1/1.25);else if(c==='out')zoom(1.25);else{vb={x:0,y:0,w:W,h:H};apply();}};
+  const cmd=c=>{if(c==='in')zoom(1/1.25);else if(c==='out')zoom(1.25);else{vb=topoHome();apply();}};
   svg.addEventListener('wheel',e=>{e.preventDefault();zoom(Math.exp(e.deltaY*(e.deltaMode===1?0.05:0.0015)),e.clientX,e.clientY);},{passive:false});
   const pts=new Map();let moved=false,pinch=0,start=null;
   svg.addEventListener('pointerdown',e=>{if(e.button)return;pts.set(e.pointerId,{x:e.clientX,y:e.clientY});
-    if(pts.size===1){moved=false;start={x:e.clientX,y:e.clientY};}
+    if(pts.size===1){moved=false;start={x:e.clientX,y:e.clientY};const g=mode==='sandbox'&&e.target.closest?e.target.closest('.dev'):null;drag=g?g.dataset.id:null;}
+    else drag=null;
     if(pts.size===2){const [a,b]=[...pts.values()];pinch=Math.hypot(a.x-b.x,a.y-b.y);}});
   svg.addEventListener('pointermove',e=>{const p=pts.get(e.pointerId);if(!p)return;
     if(pts.size===1){if(!moved&&Math.hypot(e.clientX-start.x,e.clientY-start.y)<4)return;
       if(!moved){moved=true;try{svg.setPointerCapture(e.pointerId);}catch(_){}svg.classList.add('panning');}
-      const s=toSvg(0,0).s;vb.x-=(e.clientX-p.x)*s;vb.y-=(e.clientY-p.y)*s;apply();}
+      const s=toSvg(0,0).s;
+      if(drag&&D[drag]){const f=D[drag].def;f.x+=(e.clientX-p.x)*s;f.y+=(e.clientY-p.y)*s;renderTopo();}
+      else{vb.x-=(e.clientX-p.x)*s;vb.y-=(e.clientY-p.y)*s;apply();}}
     else if(pts.size===2){moved=true;const o=[...pts.entries()].find(([k])=>k!==e.pointerId)[1],d=Math.hypot(e.clientX-o.x,e.clientY-o.y);
       if(pinch&&d)zoom(pinch/d,(e.clientX+o.x)/2,(e.clientY+o.y)/2);pinch=d;}
     p.x=e.clientX;p.y=e.clientY;});
-  const up=e=>{pts.delete(e.pointerId);if(pts.size<2)pinch=0;if(!pts.size)svg.classList.remove('panning');
+  const up=e=>{if(drag&&moved&&D[drag]){const f=D[drag].def;f.x=Math.round(f.x);f.y=Math.round(f.y);save();}if(pts.size<=1)drag=null;pts.delete(e.pointerId);if(pts.size<2)pinch=0;if(!pts.size)svg.classList.remove('panning');
     if(pts.size===1){const [q]=pts.values();start={x:q.x,y:q.y};}};
   svg.addEventListener('pointerup',up);svg.addEventListener('pointercancel',up);
   svg.addEventListener('click',e=>{if(moved){moved=false;return;}const g=e.target.closest('.dev');if(g)onPick(g.dataset.id);},true);
   svg.addEventListener('keydown',e=>{const g=e.target.closest('.dev');if(g&&(e.key==='Enter'||e.key===' ')){e.preventDefault();onPick(g.dataset.id);}
     else if(e.key==='+'||e.key==='=')cmd('in');else if(e.key==='-')cmd('out');else if(e.key==='0')cmd('reset');});
   svg.addEventListener('dblclick',e=>{if(!e.target.closest('.dev'))zoom(1/1.6,e.clientX,e.clientY);});
-  return {cmd};
+  apply();const api={cmd};ZOOMS.push(api);return api;
 }
 // Real pop-out window kept live by the main page. Returns false where popups are blocked (e.g. a sandboxed frame).
 function openTopoWindow(){
@@ -1526,10 +1670,11 @@ body{display:grid;grid-template-rows:auto 1fr auto;height:100vh}</style></head><
     popWin=w;return true;}catch(_){try{w.close();}catch(__){}return false;}
 }
 function boot(){
-  if(!restore())loadScenario('factory');
+  if(!restore()){mode='lab';loadScenario('factory');}
+  if(!D[active])active=Object.keys(D)[0]||null;
   const inp=$('#cmd');
   inp.addEventListener('keydown',e=>{
-    const s0=S[active];if(s0.busy){e.preventDefault();return;}
+    const s0=S[active];if(!s0||s0.busy){e.preventDefault();return;}
     const {d:ed,s}=effOf(active);
     const isSw=ed.def.kind==='switch'&&s.login==='ok'&&!s.pending;
     if(e.key==='Enter'){e.preventDefault();submit();}
@@ -1551,28 +1696,42 @@ function boot(){
   $('#btnTopoClose').addEventListener('click',closeFull);
   $('#topoFull').addEventListener('keydown',e=>{if(e.key==='Escape')closeFull();});
   $('#btnTopoWin').addEventListener('click',()=>{if(openTopoWindow())closeFull();else $('#popMsg').textContent='This page is not allowed to open new windows here, so use this large view instead.';});
-  document.querySelector('.tabs').addEventListener('click',e=>{const b=e.target.closest('button[role=tab]');if(!b)return;
-    for(const t of document.querySelectorAll('.tabs button')){const on=t===b;t.setAttribute('aria-selected',on);$('#'+t.getAttribute('aria-controls')).hidden=!on;}});
+  document.querySelector('.tabs').addEventListener('click',e=>{const b=e.target.closest('button[role=tab]');if(b)selectTab(b.id);});
   let armed=null;
   const arm=(btn,label,fn)=>{if(armed===btn){armed=null;fn();return;}if(armed)armed.textContent=armed.dataset.label;armed=btn;btn.dataset.label=btn.textContent;btn.textContent=label;
     setTimeout(()=>{if(armed===btn){btn.textContent=btn.dataset.label;armed=null;}},3500);};
   $('#pane-ft').addEventListener('click',e=>{const b=e.target.closest('button[data-scen]');if(!b)return;arm(b,'Click again to replace the current lab',()=>{loadScenario(b.dataset.scen);active='SW1';afterCommand();});});
-  $('#btnReset').addEventListener('click',e=>arm(e.currentTarget,'Click again to wipe everything',()=>{loadScenario('factory');active='SW1';afterCommand();$('#btnReset').textContent='Reset to factory';}));
-  $('#btnClear').addEventListener('click',()=>{S[active].buf.length=0;render();inp.focus();});
+  $('#btnReset').addEventListener('click',e=>arm(e.currentTarget,mode==='sandbox'?'Click again to wipe every config':'Click again to wipe everything',()=>{
+    if(mode==='sandbox'){sbFactoryAll();sbMsg('Every device is back to factory defaults. Equipment and cables are kept.');}else{loadScenario('factory');active='SW1';}afterCommand();applyModeUI();}));
+  // sandbox
+  const modeSwitched=()=>{if(armed){armed.textContent=armed.dataset.label;armed=null;}applyModeUI();fitTopo();sbMsg('');afterCommand();};
+  $('#btnMode').addEventListener('click',()=>{if(mode==='sandbox')exitSandbox();else enterSandbox();modeSwitched();});
+  $('#sbAdd').addEventListener('click',()=>{const r=sbAddDevice($('#sbType').value);if(r.err)return sbMsg(r.err,true);active=r.id;
+    sbMsg(`Added ${r.id}. ${D[r.id].def.kind==='switch'?'Cable it up, then log in with manager / friend.':'Cable it to a switch, then give it an address with ip or dhcp.'}`);afterCommand();fitTopo();});
+  $('#sbA').addEventListener('change',()=>fillPorts('#sbA','#sbPA'));$('#sbB').addEventListener('change',()=>fillPorts('#sbB','#sbPB'));
+  $('#sbConnect').addEventListener('click',()=>{const a=$('#sbA').value,pa=$('#sbPA').value,b=$('#sbB').value,pb=$('#sbPB').value;const err=sbConnect(a,pa,b,pb);
+    if(err)return sbMsg(err,true);sbMsg(`Connected ${a} ${pa} to ${b} ${pb}.`);afterCommand();});
+  $('#sbDevs').addEventListener('click',e=>{const o=e.target.closest('button[data-open]');if(o)return selectDev(o.dataset.open);
+    const b=e.target.closest('button[data-del]');if(b)arm(b,'Confirm',()=>{const id=b.dataset.del;sbRemoveDevice(id);if(active===id)active=Object.keys(D)[0]||null;sbMsg(`Removed ${id} and its cables.`);afterCommand();fitTopo();});});
+  $('#sbLinks').addEventListener('click',e=>{const b=e.target.closest('button[data-unplug]');if(!b)return;const l=LINKS[+b.dataset.unplug];sbDisconnect(+b.dataset.unplug);if(l)sbMsg(`Unplugged ${l.a[0]} ${l.a[1]} ↔ ${l.b[0]} ${l.b[1]}.`);afterCommand();});
+  const restart=(btn,kind)=>arm(btn,'Click again to replace the sandbox',()=>{newSandbox(kind);currentScen='sandbox';active=Object.keys(D)[0]||null;
+    sbMsg(kind==='standard'?'Fresh copy of the standard topology, all on factory defaults.':'Empty bench. Add a switch to begin.');afterCommand();fitTopo();});
+  $('#sbStd').addEventListener('click',e=>restart(e.currentTarget,'standard'));$('#sbEmpty').addEventListener('click',e=>restart(e.currentTarget,'empty'));
+  $('#btnClear').addEventListener('click',()=>{if(S[active])S[active].buf.length=0;render();inp.focus();});
   // modal
-  const modal=$('#modal');let mode='';
-  const openM=m=>{mode=m;modal.hidden=false;$('#mMsg').textContent='';$('#mFile').hidden=m!=='import';
-    if(m==='export'){$('#mTitle').textContent='Export lab';$('#mText').textContent='Copy this JSON and keep it somewhere safe. Import it later to restore every device, including saved startup configs.';$('#mArea').value=JSON.stringify(snapshot(),null,1);$('#mArea').readOnly=true;$('#mOk').textContent='Copy to clipboard';}
-    else{$('#mTitle').textContent='Import lab';$('#mText').textContent='Paste an exported lab, or choose a .json file. This replaces the current lab.';$('#mArea').value='';$('#mArea').readOnly=false;$('#mOk').textContent='Load lab';}
+  const modal=$('#modal');let mMode='';
+  const openM=m=>{mMode=m;modal.hidden=false;$('#mMsg').textContent='';$('#mFile').hidden=m!=='import';
+    if(m==='export'){$('#mTitle').textContent=mode==='sandbox'?'Export sandbox':'Export lab';$('#mText').textContent=mode==='sandbox'?'Copy this JSON and keep it somewhere safe. It holds your equipment, cabling, layout and every config. Importing it later reopens the sandbox.':'Copy this JSON and keep it somewhere safe. Import it later to restore every device, including saved startup configs.';$('#mArea').value=JSON.stringify(snapshot(),null,1);$('#mArea').readOnly=true;$('#mOk').textContent='Copy to clipboard';}
+    else{$('#mTitle').textContent='Import lab';$('#mText').textContent='Paste an exported lab or sandbox, or choose a .json file. A lab export replaces the lessons lab; a sandbox export replaces the sandbox.';$('#mArea').value='';$('#mArea').readOnly=false;$('#mOk').textContent='Load lab';}
     $('#mArea').focus();};
   $('#btnExport').addEventListener('click',()=>openM('export'));$('#btnImport').addEventListener('click',()=>openM('import'));
   $('#mCancel').addEventListener('click',()=>{modal.hidden=true;inp.focus();});
   modal.addEventListener('keydown',e=>{if(e.key==='Escape'){modal.hidden=true;inp.focus();}});
   $('#mFile').addEventListener('change',async e=>{const f=e.target.files[0];if(f)$('#mArea').value=await f.text();});
   $('#mOk').addEventListener('click',async()=>{
-    if(mode==='export'){try{await navigator.clipboard.writeText($('#mArea').value);$('#mMsg').textContent='Copied.';}catch(err){$('#mArea').select();$('#mMsg').textContent='Copy was blocked. The text is selected: press Ctrl+C.';}}
-    else{try{applySnapshot(JSON.parse($('#mArea').value));active='SW1';afterCommand();modal.hidden=true;}catch(err){$('#mMsg').textContent='Could not load: '+err.message+'.';}}});
-  renderRef();refresh();
+    if(mMode==='export'){try{await navigator.clipboard.writeText($('#mArea').value);$('#mMsg').textContent='Copied.';}catch(err){$('#mArea').select();$('#mMsg').textContent='Copy was blocked. The text is selected: press Ctrl+C.';}}
+    else{try{const o=JSON.parse($('#mArea').value);save();applySnapshot(o);active=Object.keys(D)[0]||null;if(D.SW1)active='SW1';applyModeUI();fitTopo();afterCommand();modal.hidden=true;}catch(err){$('#mMsg').textContent='Could not load: '+err.message+'.';}}});
+  renderRef();applyModeUI();refresh();
 }
 if(typeof document!=='undefined')document.addEventListener('DOMContentLoaded',boot);
 </script>
