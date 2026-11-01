@@ -11,6 +11,7 @@
 :root{
   --bg:#0e151d; --panel:#151f2a; --panel-2:#1b2834; --line:#2a3a4b;
   --text:#dbe4ee; --muted:#8c9eb2; --accent:#f2a33a; --ok:#45c08a; --bad:#e3584e; --term:#0a1016;
+  --code:#cfe3f5; --term-text:#d6dde6; --term-input:#fff; --bad-text:#ffb3ad; --on-accent:#1b1306; --sw-fill:#1f3043; --scrim:rgba(5,9,13,.7);
   --display:'IBM Plex Sans Condensed','Arial Narrow',sans-serif;
   --body:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
   --mono:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
@@ -31,8 +32,8 @@ header h1 span{color:var(--accent)}
 .spacer{flex:1}
 .btn{background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:6px 11px;font-size:13px}
 .btn:hover{border-color:var(--muted)}
-.btn.primary{background:var(--accent);border-color:var(--accent);color:#1b1306;font-weight:600}
-.btn.warn{border-color:var(--bad);color:#ffb3ad}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:600}
+.btn.warn{border-color:var(--bad);color:var(--bad-text)}
 
 main{display:grid;grid-template-columns:minmax(330px,410px) 1fr;min-height:0}
 .rail{border-right:1px solid var(--line);overflow-y:auto;display:flex;flex-direction:column;min-height:0}
@@ -42,7 +43,7 @@ main{display:grid;grid-template-columns:minmax(330px,410px) 1fr;min-height:0}
 .topo.panning{cursor:grabbing}
 .topo .dev{cursor:pointer}
 .topo .dev rect{fill:var(--panel-2);stroke:var(--line);stroke-width:1.2}
-.topo .dev.sw rect{fill:#1f3043}
+.topo .dev.sw rect{fill:var(--sw-fill)}
 .topo .dev.active rect{stroke:var(--accent);stroke-width:2}
 .topo .dev:hover rect{stroke:var(--muted)}
 .topo text{fill:var(--text);font-family:var(--body)}
@@ -72,7 +73,7 @@ main{display:grid;grid-template-columns:minmax(330px,410px) 1fr;min-height:0}
 .dot.ok{background:var(--ok)}
 .dot.amber{background:var(--accent)}
 .tests li.warn{background:rgba(227,88,78,.12);border:1px solid var(--bad);border-radius:6px;padding:6px 8px;align-items:flex-start}
-.tests li.warn b{color:#ffb3ad}
+.tests li.warn b{color:var(--bad-text)}
 .legend{display:flex;gap:12px;flex-wrap:wrap;margin:6px 0 0;font-size:11.5px;color:var(--muted)}
 .legend i{display:inline-block;width:18px;height:0;border-top:2px solid var(--ok);vertical-align:middle;margin-right:4px}
 .legend i.b{border-top:2px dashed var(--accent)}.legend i.l{border-top:2px dotted var(--accent)}.legend i.d{border-top:2px dashed var(--bad)}
@@ -86,7 +87,7 @@ select{background:var(--term);color:var(--text);border:1px solid var(--line);bor
 .sbcable #sbConnect{grid-column:2/5;justify-self:start}
 .sbintro{margin:0}
 #sbMsg{margin:6px 0 0;min-height:1.2em}
-#sbMsg.err{color:#ffb3ad}
+#sbMsg.err{color:var(--bad-text)}
 .sbh{font:600 12px/1.2 var(--display);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:10px 0 4px}
 .sblist{list-style:none;margin:0;padding:0;display:grid;gap:3px}
 .sblist li{display:flex;gap:8px;align-items:center;font-size:12.5px;padding:3px 0;border-bottom:1px solid var(--line)}
@@ -114,7 +115,7 @@ select{background:var(--term);color:var(--text);border:1px solid var(--line);bor
 .task p{margin:0;color:var(--muted);font-size:13px}
 .task p b{color:var(--text);font-weight:500}
 details summary{cursor:pointer;color:var(--accent);font-size:12.5px}
-details pre{margin:6px 0 0;padding:8px;background:var(--term);border:1px solid var(--line);border-radius:6px;font:12px/1.45 var(--mono);white-space:pre-wrap;color:#cfe3f5}
+details pre{margin:6px 0 0;padding:8px;background:var(--term);border:1px solid var(--line);border-radius:6px;font:12px/1.45 var(--mono);white-space:pre-wrap;color:var(--code)}
 .theory summary{list-style:none;cursor:pointer;color:var(--text);font-size:inherit}
 .theory summary::-webkit-details-marker{display:none}
 .theory summary::after{content:'+';color:var(--accent);font:600 14px/1 var(--mono)}
@@ -126,7 +127,7 @@ details pre{margin:6px 0 0;padding:8px;background:var(--term);border:1px solid v
 .ref h3{font:600 13px/1.2 var(--body);margin:6px 0 4px}
 .ref table{border-collapse:collapse;width:100%;font-size:12.5px}
 .ref td{padding:3px 4px;border-bottom:1px solid var(--line);vertical-align:top}
-.ref td:first-child{font-family:var(--mono);width:58%;overflow-wrap:anywhere;color:#cfe3f5;font-size:12px}
+.ref td:first-child{font-family:var(--mono);width:58%;overflow-wrap:anywhere;color:var(--code);font-size:12px}
 .ref td:last-child{color:var(--muted)}
 .ref .theory h3{margin:0;font:600 14px/1.3 var(--body)}
 .ref .theory td:first-child{width:42%}
@@ -135,16 +136,16 @@ details pre{margin:6px 0 0;padding:8px;background:var(--term);border:1px solid v
 .field{background:var(--term);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:13px var(--mono);min-width:0;width:100%}
 .field:focus{outline:2px solid var(--accent);outline-offset:-1px}
 .sc .sc-tab td:first-child{font-family:var(--body);color:var(--muted);width:34%;font-size:12.5px}
-.sc .sc-tab td:last-child{font-family:var(--mono);color:#cfe3f5;font-size:12px}
+.sc .sc-tab td:last-child{font-family:var(--mono);color:var(--code);font-size:12px}
 .sc .sc-split th{text-align:left;font-weight:500;color:var(--muted);padding:3px 4px;border-bottom:1px solid var(--line)}
-.sc .sc-split td,.sc .sc-split td:first-child{font-family:var(--mono);color:#cfe3f5;font-size:11.5px;width:auto;white-space:nowrap}
+.sc .sc-split td,.sc .sc-split td:first-child{font-family:var(--mono);color:var(--code);font-size:11.5px;width:auto;white-space:nowrap}
 .sc .sc-split tr.here td{background:rgba(242,163,58,.12)}
 .sc .sc-cmds td:first-child{width:52%}
 .sc .linkbtn.mono{font:12px var(--mono);text-align:left;overflow-wrap:anywhere}
 .sc-bin{display:grid;grid-template-columns:70px 1fr;gap:3px 8px;font-size:12px;color:var(--muted);overflow-x:auto}
 .sc-bin code{font:12px var(--mono);white-space:nowrap;background:none;border:0;padding:0}
-.sc-bin .nb,.nbk{color:var(--accent)}.sc-bin .hb{color:#cfe3f5}.sc-bin .sep{color:var(--muted)}
-.sc-list{margin:0;padding-left:18px;font:12px var(--mono);color:#cfe3f5}
+.sc-bin .nb,.nbk{color:var(--accent)}.sc-bin .hb{color:var(--code)}.sc-bin .sep{color:var(--muted)}
+.sc-list{margin:0;padding-left:18px;font:12px var(--mono);color:var(--code)}
 .sc-ok,.sc-warn,.sc-err{font-size:12.5px;margin:0;padding:6px 8px;border-radius:6px;border-left:3px solid}
 .sc-ok{color:var(--ok);border-color:var(--ok);background:rgba(69,192,138,.1)}
 .sc-warn{color:var(--accent);border-color:var(--accent);background:rgba(242,163,58,.1)}
@@ -156,22 +157,36 @@ details pre{margin:6px 0 0;padding:8px;background:var(--term);border:1px solid v
 .devtabs button{background:var(--panel-2);border:1px solid var(--line);border-bottom:0;border-radius:6px 6px 0 0;padding:6px 10px;font-size:12.5px;color:var(--muted);white-space:nowrap}
 .devtabs button[aria-selected="true"]{background:var(--term);color:var(--text);border-color:var(--accent)}
 .devtabs small{font-family:var(--mono);opacity:.75;margin-right:4px}
-.term{flex:1;background:var(--term);overflow-y:auto;padding:10px 14px 14px;font:13px/1.4 var(--mono);color:#d6dde6;min-height:0;cursor:text}
+.term{flex:1;background:var(--term);overflow-y:auto;padding:10px 14px 14px;font:13px/1.4 var(--mono);color:var(--term-text);min-height:0;cursor:text}
 .term pre{margin:0;font:inherit;white-space:pre-wrap;word-break:break-word}
 .inrow{display:flex;align-items:baseline}
 .inrow .pr{white-space:pre;color:var(--accent)}
-.inrow input{flex:1;min-width:40px;background:transparent;border:0;outline:0;color:#fff;font:inherit;padding:0;caret-color:var(--accent)}
+.inrow input{flex:1;min-width:40px;background:transparent;border:0;outline:0;color:var(--term-input);font:inherit;padding:0;caret-color:var(--accent)}
 .termbar{display:flex;gap:12px;align-items:center;padding:6px 12px;background:var(--panel);border-top:1px solid var(--line);font-size:12px;color:var(--muted);flex-wrap:wrap}
 
 footer{padding:6px 16px;font-size:11.5px;color:var(--muted);border-top:1px solid var(--line);background:var(--panel);display:flex;gap:12px;flex-wrap:wrap}
 
-.modal{position:fixed;inset:0;background:rgba(5,9,13,.7);display:grid;place-items:center;padding:16px;z-index:10}
+.modal{position:fixed;inset:0;background:var(--scrim);display:grid;place-items:center;padding:16px;z-index:10}
 .modal[hidden]{display:none}
 .dialog{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;width:min(620px,100%);display:grid;gap:10px}
 .dialog h2{margin:0;font:600 17px/1.2 var(--display)}
 .dialog textarea{width:100%;height:220px;background:var(--term);color:var(--text);border:1px solid var(--line);border-radius:6px;font:12px/1.4 var(--mono);padding:8px}
 .dialog .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .msg{font-size:12.5px;color:var(--muted)}
+
+
+/* Colour themes: picked in the header, saved in localStorage (awplus-testlab-theme) */
+[data-theme="light"]{color-scheme:light;--bg:#eef2f6;--panel:#ffffff;--panel-2:#f3f6f9;--line:#c9d3de;--text:#1b2733;--muted:#5a6b7d;--accent:#b8620a;--ok:#1d8a5a;--bad:#c23a30;--term:#fbfcfd;
+  --code:#16324d;--term-text:#1b2733;--term-input:#000;--bad-text:#b3261e;--on-accent:#fff;--sw-fill:#e3ecf5;--scrim:rgba(30,40,50,.45)}
+[data-theme="contrast"]{--bg:#000;--panel:#000;--panel-2:#111;--line:#fff;--text:#fff;--muted:#e0e0e0;--accent:#ffd400;--ok:#3cff8f;--bad:#ff5c5c;--term:#000;
+  --code:#fff;--term-text:#fff;--term-input:#fff;--bad-text:#ff8a8a;--on-accent:#000;--sw-fill:#1a1a1a;--scrim:rgba(0,0,0,.85)}
+[data-theme="terminal"]{--bg:#050805;--panel:#0a110a;--panel-2:#0f1a0f;--line:#1f3a1f;--text:#9df59d;--muted:#5fa85f;--accent:#39ff14;--ok:#39ff14;--bad:#ff4f4f;--term:#000;
+  --code:#9df59d;--term-text:#7dff7d;--term-input:#b6ffb6;--bad-text:#ff8f8f;--on-accent:#021002;--sw-fill:#0f220f;--scrim:rgba(0,8,0,.75);
+  --display:var(--mono);--body:var(--mono)}
+[data-theme="ocean"]{--bg:#0b1a2b;--panel:#10233a;--panel-2:#152d48;--line:#24476b;--text:#dceaf7;--muted:#8fb0cf;--accent:#3fc1e0;--ok:#4fd1a5;--bad:#f0726b;--term:#07121f;
+  --code:#cfe9f7;--term-text:#d4e8f5;--on-accent:#04202a;--sw-fill:#18375a}
+.themepick{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted)}
+.themepick select{background:var(--panel-2);font-size:13px}
 
 @media (max-width:900px){
   body{overflow:auto;display:block}
@@ -181,12 +196,16 @@ footer{padding:6px 16px;font-size:11.5px;color:var(--muted);border-top:1px solid
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
+<script>try{const t=localStorage.getItem('awplus-testlab-theme');if(t&&t!=='dark')document.documentElement.dataset.theme=t;}catch(e){}</script>
 </head>
 <body>
 <header>
   <h1>AW<span>+</span> Test Lab</h1>
   <span class="chip">Lab: <b id="scenName">Factory default</b></span>
   <span class="spacer"></span>
+  <label class="themepick">Theme
+    <select id="themeSel"><option value="dark">Dark</option><option value="light">Light</option><option value="contrast">High contrast</option><option value="terminal">Classic terminal</option><option value="ocean">Ocean</option></select>
+  </label>
   <button class="btn" id="btnMode" type="button" aria-pressed="false" title="Build your own network with as much equipment as you like">Sandbox</button>
   <button class="btn" id="btnExport" type="button">Export lab</button>
   <button class="btn" id="btnImport" type="button">Import lab</button>
@@ -1732,7 +1751,8 @@ function renderChecks(){
   if(net.storms.length){const devs=new Set(),vl=new Set();for(const comp of net.storms)for(const n of comp){const [id,v]=n.split('|');if(D[id].def.kind==='switch'){devs.add(devLabel(id));vl.add(+v);}}
     warn=`<li class="warn"><span class="dot" aria-hidden="true"></span><span><b>Loop detected:</b> broadcast storm in VLAN ${fmtVlans([...vl])} across ${[...devs].join(', ')}. Traffic in those VLANs is failing.</span></li>`;}
   $('#tests').innerHTML=warn+TESTS.map(t=>{const ok=testOk(t);return `<li><span class="dot ${ok?'ok':''}" aria-hidden="true"></span><span>${t.label}${t.note?` <span style="color:var(--muted)">· ${t.note}</span>`:''}</span><span class="ip">${t.blocked?(ok?'blocked':'not blocked'):(ok?'reachable':'fails')}</span></li>`;}).join('');
-  $('#pane-ex').innerHTML=EXERCISES.map((e,i)=>{const ok=!!e.check();return `<article class="task ${ok?'done':'todo'}"><div class="task-h"><span class="num">${String(i+1).padStart(2,'0')}</span><h3>${e.t}</h3><span class="state">${ok?'Done':'To do'}</span></div><p>${e.d}</p><details><summary>Show example commands</summary><pre>${esc(e.sol)}</pre></details><button class="linkbtn" type="button" data-theory="${i}">Why? Read the theory</button></article>`;}).join('')+
+  const exOpen=new Set([...$('#pane-ex').querySelectorAll('details[open]')].map(d=>d.dataset.ex));
+  $('#pane-ex').innerHTML=EXERCISES.map((e,i)=>{const ok=!!e.check();return `<article class="task ${ok?'done':'todo'}"><div class="task-h"><span class="num">${String(i+1).padStart(2,'0')}</span><h3>${e.t}</h3><span class="state">${ok?'Done':'To do'}</span></div><p>${e.d}</p><details data-ex="${i}"${exOpen.has(String(i))?' open':''}><summary>Show example commands</summary><pre>${esc(e.sol)}</pre></details><button class="linkbtn" type="button" data-theory="${i}">Why? Read the theory</button></article>`;}).join('')+
     `<p class="msg">Checks run live after every command. Hosts are pre-addressed: PCs in 192.168.10.0/24, CCTV in 192.168.20.0/24, gateways on .1.</p>`;
   const allOk=allTests();
   $('#pane-ft').innerHTML=Object.entries(SCENARIOS).filter(([k])=>k!=='factory').map(([k,sc])=>{const cur=k===currentScen;
@@ -1963,6 +1983,9 @@ function boot(){
   $('#mOk').addEventListener('click',async()=>{
     if(mMode==='export'){try{await navigator.clipboard.writeText($('#mArea').value);$('#mMsg').textContent='Copied.';}catch(err){$('#mArea').select();$('#mMsg').textContent='Copy was blocked. The text is selected: press Ctrl+C.';}}
     else{try{const o=JSON.parse($('#mArea').value);save();applySnapshot(o);active=Object.keys(D)[0]||null;if(D.SW1)active='SW1';applyModeUI();fitTopo();afterCommand();modal.hidden=true;}catch(err){$('#mMsg').textContent='Could not load: '+err.message+'.';}}});
+  const THEMEKEY='awplus-testlab-theme',tSel=$('#themeSel');
+  try{tSel.value=localStorage.getItem(THEMEKEY)||'dark';}catch(e){}if(!tSel.value)tSel.value='dark';
+  tSel.addEventListener('change',()=>{const t=tSel.value;if(t==='dark')delete document.documentElement.dataset.theme;else document.documentElement.dataset.theme=t;try{localStorage.setItem(THEMEKEY,t);}catch(e){}});
   renderRef();renderTheory();renderSubnet();applyModeUI();refresh();
 }
 if(typeof document!=='undefined')document.addEventListener('DOMContentLoaded',boot);

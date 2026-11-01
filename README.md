@@ -16,6 +16,7 @@ Created by Rikki Keene. © 2026 Rikki Keene.
 - **See the network react.** The topology diagram redraws link states as you work (forwarding, blocked by spanning tree, LACP not bundled, down), and six reachability checks update after every command.
 - **Guided, then on your own.** 13 exercises build a full VLAN design step by step; six fault tickets drop you into a broken network to troubleshoot.
 - **Safe to break.** Cause a broadcast storm, lock yourself out with an ACL, erase the config, then reset or restore from a backup.
+- **Pick a look.** The Theme menu in the header switches between Dark, Light, High contrast, Classic terminal and Ocean, and remembers your choice.
 
 ## Screenshots
 
