@@ -30,6 +30,26 @@ const EXPECT = {
     const ex = () => EXERCISES.map(e => e.check() ? 1 : 0).join('');
     const run = (id, cmds) => { const s = { buf: [], mode: 'priv', login: 'ok', ifSel: null, pending: null, sink: [] }; for (const c of cmds) { s.sink.push('#' + c); execLine(D[id], s, c); } return s.sink.join('\n'); };
     for (const k of Object.keys(SCENARIOS)) { loadScenario(k); invalidate(); res[k] = { tests: tests(), ex: ex(), storms: buildNet().storms.length }; }
+    // course walkthrough: do each exercise in order from factory; exercise N must complete at step N
+    loadScenario('factory');
+    const ct = 'configure terminal', both = ['SW2', 'SW3'], all = ['SW1', 'SW2', 'SW3'];
+    const trunk = ['switchport mode trunk', 'switchport trunk allowed vlan add 10,20,99'];
+    const steps = [
+      () => { run('SW1', [ct, 'hostname CORE']); run('SW2', [ct, 'hostname ACCESS1']); run('SW3', [ct, 'hostname ACCESS2']); },
+      () => all.forEach(id => run(id, [ct, 'vlan database', 'vlan 10 name Data', 'vlan 20 name CCTV', 'vlan 99 name Mgmt'])),
+      () => both.forEach(id => run(id, [ct, 'interface port1.0.1', 'switchport mode access', 'switchport access vlan 10', 'interface port1.0.2', 'switchport access vlan 20'])),
+      () => { run('SW1', [ct, 'interface port1.0.1-1.0.2', ...trunk]); both.forEach(id => run(id, [ct, 'interface port1.0.10', ...trunk])); },
+      () => run('SW1', [ct, 'interface vlan10', 'ip address 192.168.10.1/24', 'interface vlan20', 'ip address 192.168.20.1/24']),
+      () => { run('SW1', [ct, 'interface vlan99', 'ip address 192.168.99.1/24']); both.forEach((id, i) => run(id, [ct, 'interface vlan99', `ip address 192.168.99.${i + 2}/24`, 'exit', 'ip route 0.0.0.0/0 192.168.99.1'])); },
+      () => all.forEach(id => run(id, [ct, 'lldp run'])),
+      () => run('SW1', [ct, 'spanning-tree priority 4096']),
+      () => { run('SW1', [ct, 'interface port1.0.1,port1.0.3', 'channel-group 1 mode active', 'interface po1', ...trunk]); run('SW2', [ct, 'interface port1.0.9-1.0.10', 'channel-group 1 mode active', 'interface po1', ...trunk]); },
+      () => both.forEach(id => run(id, [ct, 'interface port1.0.1-1.0.2', 'spanning-tree edgeport'])),
+      () => run('SW2', [ct, 'access-list 3000 permit ip 192.168.20.0/24 192.168.20.0/24', 'access-list 3000 deny ip 192.168.20.0/24 any', 'interface port1.0.2', 'access-group 3000']),
+      () => { run('SW1', [ct, 'ip dhcp pool DATA', 'network 192.168.10.0/24', 'range 192.168.10.100 192.168.10.199', 'default-router 192.168.10.1', 'exit', 'ip dhcp pool CCTV', 'network 192.168.20.0/24', 'range 192.168.20.100 192.168.20.199', 'default-router 192.168.20.1', 'exit', 'service dhcp-server']); invalidate(); S.PC1.sink = []; hostCmd('PC1', 'dhcp'); delete S.PC1.sink; },
+      () => all.forEach(id => run(id, ['write'])),
+    ];
+    res.course = steps.map(f => { f(); invalidate(); return ex(); });
     // storm fix: re-enable STP on ACCESS2
     loadScenario('storm'); run('SW3', ['configure terminal', 'spanning-tree enable']); invalidate();
     res.stormFixed = { tests: tests(), storms: buildNet().storms.length, cross: linkState(LINKS[3]) };
@@ -84,6 +104,8 @@ const EXPECT = {
     ['lacp fixed', r.lacpFixed.tests === '111111'], ['dhcp fixed', r.dhcpFixed.tests === '111111'], ['config round trip', r.roundTrip && r.rt2], ['backup restore', r.restore], ['pipe include', r.pipeOk],
     ['ntp sync', r.ntp.includes('synchronized, stratum 5')], ['speed mismatch drops link', r.speedDown], ['speed auto restores link', r.speedUp], ['solved has no loop', r.solved.storms === 0], ['factory has no loop', r.factory.storms === 0]];
   for (const [n, ok] of extra) { if (!ok) fail++; console.log(`${ok ? 'PASS' : 'FAIL'} ${n}`); }
+  const courseBad = r.course.map((e, i) => e === '1'.repeat(i + 1) + '0'.repeat(e.length - i - 1) ? null : `step ${i + 1}: ${e}`).filter(Boolean);
+  console.log(`${courseBad.length ? 'FAIL' : 'PASS'} course walkthrough completes each exercise in order${courseBad.length ? ' (' + courseBad.join(', ') + ')' : ''}`); if (courseBad.length) fail++;
   if (process.argv.includes('-v')) { console.log(r.factoryStp); console.log(r.show); console.log(r.acc); console.log(r.help); console.log(JSON.stringify(r.stormFixed)); console.log(r.dhcp0, '|', r.dhcp1, r.dhcp1t, '|', r.dhcp2); console.log(r.dhcpShow); console.log(r.dir); console.log(r.pipe); console.log(r.ntp); console.log(r.misc); }
 
   // UI smoke test: log in, run a ping, open help

@@ -1275,7 +1275,7 @@ const trunkOk=(id,p)=>{const x=effPort(D[id].cfg,p);return x.mode==='trunk'&&[10
 const allTests=()=>TESTS.every(testOk);
 function lagOk(){const a=pt('SW1','port1.0.1').agg,b=pt('SW2','port1.0.10').agg;
   return !!a&&a.startsWith('po')&&pt('SW1','port1.0.3').agg===a&&!!b&&b.startsWith('po')&&pt('SW2','port1.0.9').agg===b&&
-    linkUsable(LINKS[0])&&linkUsable(LINKS[1])&&trunkOk('SW1','port1.0.1')&&trunkOk('SW2','port1.0.10')&&allTests();}
+    linkUsable(LINKS[0])&&linkUsable(LINKS[1])&&trunkOk('SW1','port1.0.1')&&trunkOk('SW2','port1.0.10')&&TESTS.filter(t=>!t.blocked).every(testOk);} // the ACL test belongs to a later exercise
 const EXERCISES=[
   {t:'Log in and name the switches',d:'Open each switch console and log in. Set the hostnames: <b>SW1 = CORE</b>, <b>SW2 = ACCESS1</b>, <b>SW3 = ACCESS2</b>.',
    sol:'manager / friend\nenable\nconfigure terminal\nhostname CORE',check:()=>hn('SW1')==='CORE'&&hn('SW2')==='ACCESS1'&&hn('SW3')==='ACCESS2'},
