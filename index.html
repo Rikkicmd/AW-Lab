@@ -98,8 +98,8 @@ select{background:var(--term);color:var(--text);border:1px solid var(--line);bor
 #btnMode[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
 .tests .ip{font-family:var(--mono);font-size:12px;color:var(--muted);margin-left:auto}
 
-.tabs{display:flex;gap:2px;padding:0 14px;border-bottom:1px solid var(--line);background:var(--panel)}
-.tabs button{background:none;border:0;border-bottom:2px solid transparent;padding:9px 10px 7px;color:var(--muted);font-weight:500}
+.tabs{display:flex;flex-shrink:0;gap:2px;padding:0 14px;overflow-x:auto;border-bottom:1px solid var(--line);background:var(--panel)}
+.tabs button{background:none;border:0;border-bottom:2px solid transparent;padding:9px 8px 7px;white-space:nowrap;color:var(--muted);font-weight:500}
 .tabs button[aria-selected="true"]{color:var(--text);border-bottom-color:var(--accent)}
 .pane{padding:12px 14px;display:grid;gap:10px}
 .pane[hidden]{display:none}
@@ -130,6 +130,26 @@ details pre{margin:6px 0 0;padding:8px;background:var(--term);border:1px solid v
 .ref td:last-child{color:var(--muted)}
 .ref .theory h3{margin:0;font:600 14px/1.3 var(--body)}
 .ref .theory td:first-child{width:42%}
+.sc .sc-in{display:grid;grid-template-columns:86px 1fr;gap:8px;align-items:center}
+.sc .sc-in label{font-size:12.5px;color:var(--muted)}
+.field{background:var(--term);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:13px var(--mono);min-width:0;width:100%}
+.field:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.sc .sc-tab td:first-child{font-family:var(--body);color:var(--muted);width:34%;font-size:12.5px}
+.sc .sc-tab td:last-child{font-family:var(--mono);color:#cfe3f5;font-size:12px}
+.sc .sc-split th{text-align:left;font-weight:500;color:var(--muted);padding:3px 4px;border-bottom:1px solid var(--line)}
+.sc .sc-split td,.sc .sc-split td:first-child{font-family:var(--mono);color:#cfe3f5;font-size:11.5px;width:auto;white-space:nowrap}
+.sc .sc-split tr.here td{background:rgba(242,163,58,.12)}
+.sc .sc-cmds td:first-child{width:52%}
+.sc .linkbtn.mono{font:12px var(--mono);text-align:left;overflow-wrap:anywhere}
+.sc-bin{display:grid;grid-template-columns:70px 1fr;gap:3px 8px;font-size:12px;color:var(--muted);overflow-x:auto}
+.sc-bin code{font:12px var(--mono);white-space:nowrap;background:none;border:0;padding:0}
+.sc-bin .nb,.nbk{color:var(--accent)}.sc-bin .hb{color:#cfe3f5}.sc-bin .sep{color:var(--muted)}
+.sc-list{margin:0;padding-left:18px;font:12px var(--mono);color:#cfe3f5}
+.sc-ok,.sc-warn,.sc-err{font-size:12.5px;margin:0;padding:6px 8px;border-radius:6px;border-left:3px solid}
+.sc-ok{color:var(--ok);border-color:var(--ok);background:rgba(69,192,138,.1)}
+.sc-warn{color:var(--accent);border-color:var(--accent);background:rgba(242,163,58,.1)}
+.sc-err{color:var(--bad);border-color:var(--bad);background:rgba(227,88,78,.1)}
+.sc .theory summary{margin-top:2px}
 
 .console{display:flex;flex-direction:column;min-height:0;min-width:0}
 .devtabs{display:flex;gap:2px;padding:6px 8px 0;background:var(--panel);border-bottom:1px solid var(--line);overflow-x:auto}
@@ -208,11 +228,13 @@ footer{padding:6px 16px;font-size:11.5px;color:var(--muted);border-top:1px solid
       <button role="tab" id="tab-ft" aria-selected="false" aria-controls="pane-ft" type="button">Fault tickets</button>
       <button role="tab" id="tab-theory" aria-selected="false" aria-controls="pane-theory" type="button">Theory</button>
       <button role="tab" id="tab-ref" aria-selected="false" aria-controls="pane-ref" type="button">Commands</button>
+      <button role="tab" id="tab-sub" aria-selected="false" aria-controls="pane-sub" type="button">Subnets</button>
     </div>
     <div class="pane" id="pane-ex" role="tabpanel"></div>
     <div class="pane" id="pane-ft" role="tabpanel" hidden></div>
     <div class="pane ref" id="pane-theory" role="tabpanel" hidden></div>
     <div class="pane ref" id="pane-ref" role="tabpanel" hidden></div>
+    <div class="pane ref sc" id="pane-sub" role="tabpanel" hidden></div>
   </aside>
 
   <section class="console" aria-label="Device console">
@@ -1548,6 +1570,90 @@ const THEORY=[
 function renderTheory(){$('#pane-theory').innerHTML='<p class="msg">Why each exercise matters and what every command does. Open one alongside its exercise.</p>'+THEORY.map((x,i)=>`<details class="task theory" id="theory-${i}"><summary class="task-h"><span class="num">${String(i+1).padStart(2,'0')}</span><h3>${esc(x.t)}</h3></summary>
   <p>${x.intro}</p><ul>${x.points.map(p=>`<li>${p}</li>`).join('')}</ul><table>${x.cmds.map(([c,w])=>`<tr><td>${esc(c)}</td><td>${w}</td></tr>`).join('')}</table></details>`).join('');}
 function openTheory(i){selectTab('tab-theory');const el=$('#theory-'+i);if(!el)return;el.open=true;el.scrollIntoView({block:'start'});el.querySelector('summary').focus();}
+/* ================= Subnet calculator ================= */
+function parseSubnet(s){s=String(s).trim().replace(/\s+/g,' ');if(!s)return {err:'Type an address with a prefix, such as 192.168.10.25/24.'};
+  const m=/^(\S+?)\s*(?:\/\s*|\s)(\S+)$/.exec(s);const ip=m?m[1]:s,tail=m?m[2]:null;
+  if(!isIp(ip))return {err:`${ip} is not a valid IPv4 address. Use four numbers from 0 to 255, separated by dots.`};
+  if(tail===null)return {err:'Add a prefix length such as /24, or a mask such as 255.255.255.0.'};
+  let len=null;if(/^\d{1,2}$/.test(tail)){len=+tail;if(len>32)return {err:'A prefix length runs from /0 to /32.'};}
+  else if(isIp(tail)){len=maskToLen(tail);if(len===null)return {err:`${tail} is not a valid mask. The 1 bits of a mask must be contiguous from the left, such as 255.255.255.192.`};}
+  else return {err:`${tail} is not a prefix length or a mask.`};
+  return calcSubnet(ip,len);}
+function ipType(n){const o=n>>>24,o2=(n>>>16)&255;
+  if(o===10||(o===172&&o2>=16&&o2<=31)||(o===192&&o2===168))return 'Private (RFC 1918)';
+  if(o===127)return 'Loopback';if(o===169&&o2===254)return 'Link-local (APIPA). A host that picks this address itself did not get a DHCP lease';
+  if(o>=224&&o<=239)return 'Multicast';if(o>=240)return 'Reserved';if(o===0)return '"This network"';return 'Public';}
+function calcSubnet(ip,len){const a=ipInt(ip),mask=maskInt(len),net=(a&mask)>>>0,total=2**(32-len),bc=(net+total-1)>>>0;
+  const r={ip,len,addr:a,net,bc,mask,wild:(~mask)>>>0,total,type:ipType(a)};
+  if(len===32){r.first=r.last=net;r.hosts=1;}else if(len===31){r.first=net;r.last=bc;r.hosts=2;}else{r.first=net+1;r.last=bc-1;r.hosts=total-2;}
+  return r;}
+function splitSubnet(r,len,max){const out=[],step=2**(32-len),n=2**(len-r.len);for(let i=0;i<Math.min(n,max);i++)out.push(calcSubnet(intIp(r.net+i*step),len));return {list:out,count:n};}
+function bits(n,len){let h='';for(let i=31;i>=0;i--){const b=(n>>>i)&1;h+=`<span class="${31-i<len?'nb':'hb'}">${b}</span>`;if(i&&i%8===0)h+='<span class="sep">.</span>';}return h;}
+function labUsers(r){const u=[];for(const id in D){const d=D[id];
+  if(d.def.kind==='host'){if(d.cfg.ip&&inNet(d.cfg.ip,r.net,r.len))u.push(`${devLabel(id)} ${d.cfg.ip}/${d.cfg.len}`);}
+  else for(const v in d.cfg.vifs){const x=d.cfg.vifs[v];if(x.ip&&inNet(x.ip,r.net,r.len))u.push(`${devLabel(id)} vlan${v} ${x.ip}/${x.len}`);}}return u;}
+const SC_QUICK=[['192.168.10.25/24','Data'],['192.168.20.50/24','CCTV'],['192.168.99.2/24','Mgmt'],['172.16.5.130/26','/26'],['10.0.0.1/30','/30 link']];
+function renderSubnet(){$('#pane-sub').innerHTML=`<p class="msg">Work out the network, broadcast and host range for any IPv4 address. Type a prefix (<code>/24</code>) or a mask (<code>255.255.255.0</code>).</p>
+  <div class="sc-in"><label for="scIp">Address</label><input id="scIp" class="field" value="192.168.10.25/24" autocomplete="off" spellcheck="false" placeholder="192.168.10.25/24"></div>
+  <div class="sbrow"><span class="sblab">Try:</span>${SC_QUICK.map(([v,l])=>`<button class="btn small" type="button" data-sc="${v}">${l}</button>`).join('')}</div>
+  <div id="scOut" aria-live="polite"></div>
+  <details class="task theory" id="scQuiz"><summary class="task-h"><h3>Practice</h3></summary><p id="scQ"></p>
+    <div class="sc-in"><label for="scQn">Network</label><input id="scQn" class="field" autocomplete="off" spellcheck="false"></div>
+    <div class="sc-in"><label for="scQb">Broadcast</label><input id="scQb" class="field" autocomplete="off" spellcheck="false"></div>
+    <div class="sbrow"><button class="btn" type="button" id="scQcheck">Check</button><button class="btn" type="button" id="scQnew">New question</button></div><p id="scQmsg" aria-live="polite"></p></details>`;
+  const pane=$('#pane-sub');
+  pane.addEventListener('input',e=>{if(e.target.id==='scIp')scRender();});
+  pane.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
+    if(b.dataset.sc){$('#scIp').value=b.dataset.sc;scRender();}
+    else if(b.dataset.cmd){const inp=$('#cmd');inp.value=b.dataset.cmd;inp.focus();}
+    else if(b.id==='scQnew')scQuizNew();else if(b.id==='scQcheck')scQuizCheck();});
+  pane.addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.target.id==='scQn'||e.target.id==='scQb'))scQuizCheck();});
+  scRender();scQuizNew();}
+function scRender(){const o=$('#scOut');if(!o)return;const r=parseSubnet($('#scIp').value);
+  const keepCmp=$('#scCmp')?$('#scCmp').value:'',keepSplit=$('#scSplit')?$('#scSplit').value:'';
+  if(r.err){o.innerHTML=`<p class="sc-err">${esc(r.err)}</p>`;return;}
+  const cidr=`${intIp(r.net)}/${r.len}`,row=(k,v,t)=>`<tr><td>${k}</td><td${t?` title="${t}"`:''}>${v}</td></tr>`;
+  const hostNote=r.len===32?' (a single host route)':r.len===31?' (point-to-point, RFC 3021)':'';
+  let h=`<table class="sc-tab">${row('Network',cidr)}${row('Mask',`${intIp(r.mask)} <span class="msg">/${r.len}</span>`)}${row('Wildcard',intIp(r.wild),'The inverse of the mask, used by wildcard-style ACL and OSPF entries')}
+    ${row('First host',intIp(r.first))}${row('Last host',intIp(r.last))}${row('Broadcast',r.len>=31?'<span class="msg">none</span>':intIp(r.bc))}
+    ${row('Usable hosts',r.hosts.toLocaleString('en-GB')+hostNote)}${row('Addresses',r.total.toLocaleString('en-GB'))}${row('Type',esc(r.type))}</table>`;
+  if(r.len<31&&r.addr===r.net)h+=`<p class="sc-warn">${r.ip} is the network address, so no device can use it.</p>`;
+  else if(r.len<31&&r.addr===r.bc)h+=`<p class="sc-warn">${r.ip} is the broadcast address, so no device can use it.</p>`;
+  h+=`<h3>Binary</h3><div class="sc-bin"><span>Address</span><code>${bits(r.addr,r.len)}</code><span>Mask</span><code>${bits(r.mask,r.len)}</code><span>Network</span><code>${bits(r.net,r.len)}</code>${r.len<31?`<span>Broadcast</span><code>${bits(r.bc,r.len)}</code>`:''}</div>
+    <p class="msg">The <b class="nbk">first ${r.len} bits</b> are the network. The other ${32-r.len} are host bits: all 0 is the network address, all 1 is the broadcast.</p>`;
+  const users=labUsers(r);
+  h+=`<h3>In this lab</h3>${users.length?`<ul class="sc-list">${users.map(u=>`<li>${esc(u)}</li>`).join('')}</ul>`:'<p class="msg">Nothing in the lab is configured in this subnet yet.</p>'}`;
+  const cmds=[];if(r.len<=30){cmds.push([`ip address ${intIp(r.first)}/${r.len}`,'On a VLAN interface. The gateway usually takes the first host.']);
+    cmds.push([`network ${cidr}`,'In a DHCP pool: the subnet it serves.']);cmds.push([`range ${intIp(r.first+1)} ${intIp(r.last)}`,'In a DHCP pool: every host address except the gateway.']);}
+  cmds.push([`access-list 3000 permit ip ${cidr} any`,'Matches traffic from anywhere in this subnet.']);
+  h+=`<h3>Use it in AW+</h3><table class="sc-cmds">${cmds.map(([c,w])=>`<tr><td><button class="linkbtn mono" type="button" data-cmd="${c}" title="Put in the console">${c}</button></td><td>${w}</td></tr>`).join('')}</table>
+    <p class="msg">Click a command to put it in the console. Enter the right config mode first.</p>`;
+  h+=`<h3>Same subnet?</h3><div class="sc-in"><label for="scCmp">Other address</label><input id="scCmp" class="field" autocomplete="off" spellcheck="false" placeholder="192.168.10.200"></div><p id="scCmpOut" class="msg"></p>`;
+  if(r.len<32){const opts=[];for(let l=r.len+1;l<=Math.min(32,r.len+8);l++)opts.push(l);
+    h+=`<h3>Split</h3><div class="sc-in"><label for="scSplit">Into</label><select id="scSplit">${opts.map(l=>`<option value="${l}">/${l} (${(2**(l-r.len)).toLocaleString('en-GB')} subnets)</option>`).join('')}</select></div><div id="scSplitOut"></div>`;}
+  o.innerHTML=h;
+  const cmp=$('#scCmp');cmp.value=keepCmp;scCompare(r);
+  const sp=$('#scSplit');if(sp){if([...sp.options].some(x=>x.value===keepSplit))sp.value=keepSplit;scShowSplit(r);}
+  cmp.oninput=()=>scCompare(r);if(sp)sp.onchange=()=>scShowSplit(r);}
+function scCompare(r){const v=$('#scCmp').value.trim(),out=$('#scCmpOut');if(!v){out.textContent='Check whether two hosts can reach each other without a router.';out.className='msg';return;}
+  if(!isIp(v)){out.textContent=`${v} is not a valid IPv4 address.`;out.className='sc-err';return;}
+  const n=ipInt(v),cidr=`${intIp(r.net)}/${r.len}`;
+  if(inNet(v,r.net,r.len)){const edge=r.len<31&&(n===r.net||n===r.bc)?` but it is the ${n===r.net?'network':'broadcast'} address, so no host can use it`:'';
+    out.textContent=`Yes. ${v} is in ${cidr}${edge}. Hosts here reach each other directly, with no router.`;out.className=edge?'sc-warn':'sc-ok';}
+  else{out.textContent=`No. With a /${r.len} mask, ${v} is in ${intIp(netOf(v,r.len))}/${r.len}. Traffic between them has to go through a router, such as the default gateway.`;out.className='sc-warn';}}
+function scShowSplit(r){const sp=$('#scSplit'),out=$('#scSplitOut');if(!sp)return;const l=+sp.value,{list,count}=splitSubnet(r,l,64);
+  out.innerHTML=`<table class="sc-tab sc-split"><tr><th>Subnet</th><th>Hosts</th><th>Broadcast</th></tr>${list.map(s=>`<tr${inNet(r.ip,s.net,l)?' class="here"':''}><td>${intIp(s.net)}/${l}</td><td>${scRange(s)}</td><td>${l>=31?'-':intIp(s.bc)}</td></tr>`).join('')}</table>
+    ${count>list.length?`<p class="msg">Showing the first ${list.length} of ${count.toLocaleString('en-GB')} subnets.</p>`:''}<p class="msg">Each /${l} has ${calcSubnet('0.0.0.0',l).hosts.toLocaleString('en-GB')} usable host${l===32?'':'s'}. The highlighted row holds ${r.ip}.</p>`;}
+function scRange(s){const a=intIp(s.first).split('.'),b=intIp(s.last).split('.');let i=0;while(i<3&&a[i]===b[i])i++;return i?'.'+a.slice(i).join('.')+' - .'+b.slice(i).join('.'):a.join('.')+' - '+b.join('.');}
+let SCQ=null;
+function scQuizNew(){const len=20+Math.floor(Math.random()*11),pick=[[10,Math.random()*256|0],[172,16+(Math.random()*16|0)],[192,168]][Math.random()*3|0];
+  const ip=[pick[0],pick[1],Math.random()*256|0,1+(Math.random()*254|0)].join('.');SCQ=calcSubnet(ip,len);
+  $('#scQ').innerHTML=`What are the network and broadcast addresses for <b>${ip}/${len}</b>?`;$('#scQn').value='';$('#scQb').value='';$('#scQmsg').textContent='';$('#scQmsg').className='msg';}
+function scQuizCheck(){if(!SCQ)return;const n=$('#scQn').value.trim().replace(/\/\d+$/,''),b=$('#scQb').value.trim(),m=$('#scQmsg');
+  const okN=n===intIp(SCQ.net),okB=b===intIp(SCQ.bc);
+  if(okN&&okB){m.textContent=`Correct. ${intIp(SCQ.net)}/${SCQ.len} has hosts ${intIp(SCQ.first)} to ${intIp(SCQ.last)}.`;m.className='sc-ok';return;}
+  const oct=Math.ceil(SCQ.len/8),blk=2**(8*oct-SCQ.len);
+  m.textContent=`${okN?'Network is right.':'Network is not right.'} ${okB?'Broadcast is right.':'Broadcast is not right.'} Hint: ${blk===1?`a /${SCQ.len} keeps the first ${oct} octets as the network. Set the host octets to 0 for the network and 255 for the broadcast.`:`a /${SCQ.len} moves in blocks of ${blk} in octet ${oct}. Find the block that holds the address. Its start is the network and the address just before the next block is the broadcast.`}`;m.className='sc-err';}
 
 /* ================= Persistence ================= */
 const KEY='awplus-testlab-v1',SBKEY='awplus-testlab-sandbox-v1',MODEKEY='awplus-testlab-mode';
@@ -1688,7 +1794,7 @@ function renderSandbox(){
   $('#sbLinks').innerHTML=LINKS.length?LINKS.map((l,i)=>{const st=linkState(l);return `<li><span class="dot ${st==='up'?'ok':st==='down'?'':'amber'}" aria-hidden="true"></span><span class="meta">${esc(l.a[0]+' '+l.a[1].replace('port','')+' ↔ '+l.b[0]+' '+l.b[1].replace('port',''))} · ${LTEXT[st]}</span><button class="btn small" type="button" data-unplug="${i}">Unplug</button></li>`;}).join('')
     :'<li class="empty">No cables yet.</li>';
 }
-function selectTab(id){for(const t of document.querySelectorAll('.tabs button')){const on=t.id===id;t.setAttribute('aria-selected',on);$('#'+t.getAttribute('aria-controls')).hidden=!on;}}
+function selectTab(id){for(const t of document.querySelectorAll('.tabs button')){const on=t.id===id;t.setAttribute('aria-selected',on);$('#'+t.getAttribute('aria-controls')).hidden=!on;}if(id==='tab-sub')scRender();}
 function applyModeUI(){const sb=mode==='sandbox';$('#sbPanel').hidden=!sb;$('#secTests').hidden=sb;$('#tab-ex').hidden=sb;$('#tab-ft').hidden=sb;
   selectTab(sb?'tab-ref':'tab-ex');
   const bm=$('#btnMode');bm.textContent=sb?'Back to lessons':'Sandbox';bm.setAttribute('aria-pressed',String(sb));
@@ -1857,7 +1963,7 @@ function boot(){
   $('#mOk').addEventListener('click',async()=>{
     if(mMode==='export'){try{await navigator.clipboard.writeText($('#mArea').value);$('#mMsg').textContent='Copied.';}catch(err){$('#mArea').select();$('#mMsg').textContent='Copy was blocked. The text is selected: press Ctrl+C.';}}
     else{try{const o=JSON.parse($('#mArea').value);save();applySnapshot(o);active=Object.keys(D)[0]||null;if(D.SW1)active='SW1';applyModeUI();fitTopo();afterCommand();modal.hidden=true;}catch(err){$('#mMsg').textContent='Could not load: '+err.message+'.';}}});
-  renderRef();renderTheory();applyModeUI();refresh();
+  renderRef();renderTheory();renderSubnet();applyModeUI();refresh();
 }
 if(typeof document!=='undefined')document.addEventListener('DOMContentLoaded',boot);
 </script>

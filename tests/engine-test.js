@@ -152,6 +152,21 @@ const EXPECT = {
     return r;
   });
   for (const k of ['start', 'ids', 'cable', 'refuse', 'ping', 'ver', 'removed', 'lab', 'persist', 'import']) { const ok = !!sb[k]; if (!ok) fail++; console.log(`${ok ? 'PASS' : 'FAIL'} sandbox ${k}`); }
+  // subnet calculator: maths, parsing, and the tab in both modes
+  const sc = await p.evaluate(() => {
+    const r = {}, f = x => [intIp(x.net), intIp(x.first), intIp(x.last), intIp(x.bc), x.hosts, intIp(x.mask), intIp(x.wild)].join(' ');
+    r.c24 = f(parseSubnet('192.168.10.25/24')) === '192.168.10.0 192.168.10.1 192.168.10.254 192.168.10.255 254 255.255.255.0 0.0.0.255';
+    r.mask = f(parseSubnet('172.16.5.130 255.255.255.192')) === '172.16.5.128 172.16.5.129 172.16.5.190 172.16.5.191 62 255.255.255.192 0.0.0.63';
+    r.edge = parseSubnet('10.0.0.1/31').hosts === 2 && parseSubnet('10.0.0.1/32').hosts === 1 && parseSubnet('1.2.3.4/0').total === 2 ** 32 && intIp(parseSubnet('1.2.3.4/0').bc) === '255.255.255.255';
+    r.bad = !!parseSubnet('1.2.3.4').err && !!parseSubnet('1.2.3.4 255.0.255.0').err && !!parseSubnet('1.2.3.400/24').err && !!parseSubnet('1.2.3.4/33').err;
+    const sp = splitSubnet(parseSubnet('192.168.10.0/24'), 26, 64);
+    r.split = sp.count === 4 && sp.list.map(x => intIp(x.net)).join(',') === '192.168.10.0,192.168.10.64,192.168.10.128,192.168.10.192';
+    loadScenario('solved'); refresh(); selectTab('tab-sub'); $('#scIp').value = '192.168.20.9/24'; scRender();
+    r.lab = $('#scOut').textContent.includes('CAM1 192.168.20.21/24');
+    enterSandbox(); r.sandbox = !$('#tab-sub').hidden; exitSandbox(); refresh(); selectTab('tab-ex');
+    return r;
+  });
+  for (const k of ['c24', 'mask', 'edge', 'bad', 'split', 'lab', 'sandbox']) { const ok = !!sc[k]; if (!ok) fail++; console.log(`${ok ? 'PASS' : 'FAIL'} subnet ${k}`); }
   await p.screenshot({ path: path.resolve(__dirname, 'shot.png') });
   if (errs.length) { fail++; console.log(errs.join('\n')); }
   console.log(fail ? `${fail} FAILED` : 'ALL PASSED');

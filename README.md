@@ -74,6 +74,7 @@ Switch login: `manager` / `friend`
 - **Theory:** a short explainer for each exercise covering the concept (VLANs, 802.1Q trunks, inter-VLAN routing, RSTP, LACP, edge ports, ACLs, DHCP, saving) and why each command is used. Every exercise has a *Why? Read the theory* link that opens its entry.
 - **Fault tickets:** pre-broken labs to troubleshoot (CCTV outage, PC offline, unmanageable switch, site-wide broadcast storm, LACP bundle down, camera with no DHCP address), plus a completed reference lab.
 - **Live connectivity:** six reachability checks update after every command.
+- **Subnets:** an IPv4 subnet calculator. Type an address with a prefix or mask to get the network, broadcast, host range, host count, mask, wildcard and a binary view. It lists which lab devices sit in that subnet, gives ready-made AW+ lines (`ip address`, DHCP `network`/`range`, `access-list`) you can click into the console, checks whether two addresses share a subnet, splits a subnet into smaller ones, and has a practice mode. Available in lessons and the sandbox.
 
 ## Sandbox
 
