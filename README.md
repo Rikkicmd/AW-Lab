@@ -71,6 +71,7 @@ Switch login: `manager` / `friend`
 ## Coursework
 
 - **Exercises:** 13 guided tasks that build a Data (VLAN 10), CCTV (VLAN 20) and Management (VLAN 99) design, then make CORE the root bridge, bundle the ACCESS1 uplinks with LACP, set edge ports, lock the cameras down with an ACL and hand out addresses by DHCP. Each is checked live.
+- **Theory:** a short explainer for each exercise covering the concept (VLANs, 802.1Q trunks, inter-VLAN routing, RSTP, LACP, edge ports, ACLs, DHCP, saving) and why each command is used. Every exercise has a *Why? Read the theory* link that opens its entry.
 - **Fault tickets:** pre-broken labs to troubleshoot (CCTV outage, PC offline, unmanageable switch, site-wide broadcast storm, LACP bundle down, camera with no DHCP address), plus a completed reference lab.
 - **Live connectivity:** six reachability checks update after every command.
 

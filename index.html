@@ -115,11 +115,21 @@ select{background:var(--term);color:var(--text);border:1px solid var(--line);bor
 .task p b{color:var(--text);font-weight:500}
 details summary{cursor:pointer;color:var(--accent);font-size:12.5px}
 details pre{margin:6px 0 0;padding:8px;background:var(--term);border:1px solid var(--line);border-radius:6px;font:12px/1.45 var(--mono);white-space:pre-wrap;color:#cfe3f5}
+.theory summary{list-style:none;cursor:pointer;color:var(--text);font-size:inherit}
+.theory summary::-webkit-details-marker{display:none}
+.theory summary::after{content:'+';color:var(--accent);font:600 14px/1 var(--mono)}
+.theory[open] summary::after{content:'\2212'}
+.theory p,.theory li{font-size:13px;color:var(--muted);line-height:1.5}
+.theory p b,.theory li b{color:var(--text);font-weight:500}
+.theory ul{margin:0;padding-left:18px;display:grid;gap:4px}
+.linkbtn{background:none;border:0;padding:0;color:var(--accent);font-size:12.5px;justify-self:start;cursor:pointer;text-decoration:underline}
 .ref h3{font:600 13px/1.2 var(--body);margin:6px 0 4px}
 .ref table{border-collapse:collapse;width:100%;font-size:12.5px}
 .ref td{padding:3px 4px;border-bottom:1px solid var(--line);vertical-align:top}
 .ref td:first-child{font-family:var(--mono);width:58%;overflow-wrap:anywhere;color:#cfe3f5;font-size:12px}
 .ref td:last-child{color:var(--muted)}
+.ref .theory h3{margin:0;font:600 14px/1.3 var(--body)}
+.ref .theory td:first-child{width:42%}
 
 .console{display:flex;flex-direction:column;min-height:0;min-width:0}
 .devtabs{display:flex;gap:2px;padding:6px 8px 0;background:var(--panel);border-bottom:1px solid var(--line);overflow-x:auto}
@@ -196,10 +206,12 @@ footer{padding:6px 16px;font-size:11.5px;color:var(--muted);border-top:1px solid
     <div class="tabs" role="tablist">
       <button role="tab" id="tab-ex" aria-selected="true" aria-controls="pane-ex" type="button">Exercises</button>
       <button role="tab" id="tab-ft" aria-selected="false" aria-controls="pane-ft" type="button">Fault tickets</button>
+      <button role="tab" id="tab-theory" aria-selected="false" aria-controls="pane-theory" type="button">Theory</button>
       <button role="tab" id="tab-ref" aria-selected="false" aria-controls="pane-ref" type="button">Commands</button>
     </div>
     <div class="pane" id="pane-ex" role="tabpanel"></div>
     <div class="pane" id="pane-ft" role="tabpanel" hidden></div>
+    <div class="pane ref" id="pane-theory" role="tabpanel" hidden></div>
     <div class="pane ref" id="pane-ref" role="tabpanel" hidden></div>
   </aside>
 
@@ -1424,6 +1436,119 @@ const EXERCISES=[
    sol:'write\nshow startup-config\nreload',check:()=>sw.every(id=>saved(D[id]))},
 ];
 
+/* ================= Theory: the why behind each exercise ================= */
+// One entry per exercise, same order. intro/points are HTML; cmds are [command, why] pairs shown as a table.
+const THEORY=[
+  {t:'Log in and name the switches',
+   intro:'AlliedWare Plus has three main command modes. You log in to <b>user exec</b> (prompt <code>awplus&gt;</code>), which can only look. <code>enable</code> takes you to <b>privileged exec</b> (<code>awplus#</code>), which can run every show, save and reload. <code>configure terminal</code> enters <b>global configuration</b> (<code>awplus(config)#</code>), where changes are made. Each mode is a safety step: you have to mean it to change anything.',
+   points:['Every factory switch is called <code>awplus</code>. With three identical prompts it is easy to type into the wrong console. A hostname puts the switch\'s role in front of you on every line.',
+     'The hostname also appears in LLDP, the log, SNMP and backup files, so neighbours and monitoring tools can tell the switches apart.',
+     'Names that describe the role (CORE, ACCESS1) age better than names that describe the box or the room.'],
+   cmds:[['manager / friend','The factory login. In a real network you change this password straight away.'],['enable','Moves to privileged exec, needed before you can configure or save.'],
+     ['configure terminal','Enters global configuration mode, where settings that affect the whole switch live.'],['hostname CORE','Renames the switch. The prompt changes immediately, which is a quick proof you are on the right device.']]},
+  {t:'Create the VLANs',
+   intro:'A <b>VLAN</b> splits one physical switch into several separate Layer 2 networks. Each VLAN is its own broadcast domain: a broadcast from a PC in VLAN 10 never reaches a camera in VLAN 20. To move between VLANs, traffic has to go through a router, which is where you can control it.',
+   points:['<b>Data (10)</b> holds the user PCs. <b>CCTV (20)</b> keeps the camera video streams away from users, both for bandwidth and so nobody casually browses to a camera. <b>Mgmt (99)</b> holds the switches\' own addresses, so management is separate from user traffic.',
+     'A switch only forwards a VLAN it knows about. The VLAN has to exist on <b>every</b> switch along the path, not just the ones with hosts in it, otherwise the trunk drops that VLAN\'s frames.',
+     'Every port starts in <b>VLAN 1</b>, the default VLAN. Moving real traffic out of VLAN 1 means a port that is plugged in but not configured does not land on your user network.',
+     'Names are only labels for people, but they make <code>show vlan brief</code> readable at 2am.'],
+   cmds:[['vlan database','Opens the VLAN database, the table of VLANs this switch knows.'],['vlan 10 name Data','Creates VLAN 10 and labels it. Repeat for 20 and 99.'],
+     ['do show vlan brief','Checks the result without leaving config mode. <code>do</code> runs any exec command from config mode.']]},
+  {t:'Assign the access ports',
+   intro:'An <b>access port</b> belongs to exactly one VLAN and sends and receives <b>untagged</b> frames. That is what end devices expect: a PC or camera has no idea VLANs exist. The switch quietly adds the VLAN to each frame as it enters and removes it as it leaves.',
+   points:['The VLAN you put a port in decides which subnet the device behind it belongs to. PC1 in VLAN 10 is on 192.168.10.0/24; CAM1 in VLAN 20 is on 192.168.20.0/24.',
+     'If a port is in the wrong VLAN, the host has link and looks fine but cannot reach its gateway or anything else in its subnet. This is one of the most common faults on a real site.',
+     'Putting the PC and the camera on different VLANs on the same switch means they cannot talk directly even though they share hardware.'],
+   cmds:[['interface port1.0.1','Selects the port the PC is on. A range such as <code>port1.0.1-1.0.4</code> also works.'],['switchport mode access','Makes the port an untagged single-VLAN port (the default, but stating it makes intent clear).'],
+     ['switchport access vlan 10','Puts the port in VLAN 10. The VLAN must already exist in the database.']]},
+  {t:'Build the trunks',
+   intro:'A <b>trunk</b> carries many VLANs over one cable between switches. Each frame gets an <b>IEEE 802.1Q tag</b>, a 4-byte field holding the VLAN ID, so the switch at the other end knows which VLAN it belongs to. Without trunks you would need one cable per VLAN between every pair of switches.',
+   points:['On AlliedWare Plus a new trunk carries only its <b>native VLAN</b> (VLAN 1, untagged) until you add tagged VLANs. Being explicit means a trunk never carries a VLAN you did not intend it to.',
+     'Only carry the VLANs that need to cross the link. Fewer VLANs on a trunk means less flooded broadcast traffic and a smaller blast radius if something goes wrong.',
+     'Both ends of a trunk must agree on the allowed VLANs and the native VLAN. A VLAN missing at one end is silently dropped there.',
+     'After this step PC1 reaches PC2 and CAM1 reaches NVR1, because each pair is in the same VLAN and subnet. PC1 still cannot reach NVR1: that needs a router.'],
+   cmds:[['interface port1.0.10','Selects the uplink towards CORE.'],['switchport mode trunk','Turns the port into an 802.1Q trunk.'],
+     ['switchport trunk allowed vlan add 10,20,99','Adds the three VLANs as tagged. <code>add</code> keeps whatever was already allowed; <code>remove</code> takes VLANs off.'],
+     ['do show interface switchport','Shows the mode, native VLAN and tagged VLANs of every port, so you can compare both ends.']]},
+  {t:'Route between VLANs on CORE',
+   intro:'VLANs keep subnets apart, so something has to route between them. CORE is a Layer 3 switch. Giving a VLAN an IP address creates a <b>VLAN interface</b> (often called an SVI) which acts as the router port for that whole VLAN. CORE can then forward packets between its VLAN interfaces in hardware, at wire speed.',
+   points:['The hosts are already set with gateway <b>.1</b>. A host sends anything outside its own subnet to its gateway, so the gateway address has to exist on CORE for routing to work at all.',
+     'When an interface gets an address, its subnet appears in <code>show ip route</code> as a <b>connected</b> route. No routing protocol is needed while every subnet is directly attached to CORE.',
+     'Routing in one place, the core, keeps the access switches simple and gives one point to apply policy between VLANs later.',
+     'A VLAN interface only comes up when the VLAN has at least one port that is up in it, which is why the trunks had to be built first.'],
+   cmds:[['interface vlan10','Creates the Layer 3 interface for VLAN 10.'],['ip address 192.168.10.1/24','Becomes the default gateway for the Data subnet. AlliedWare Plus uses prefix-length notation.'],
+     ['do show ip route','Confirms both subnets are listed as connected (C).']]},
+  {t:'Add switch management',
+   intro:'Switches need their own IP address so you can manage them remotely with SSH, ping them, monitor them with SNMP and send their logs somewhere. That address lives on a dedicated <b>management VLAN</b>, separate from user and camera traffic.',
+   points:['Keeping management on its own VLAN means you can later restrict who can reach it (for example with an ACL) without touching user traffic.',
+     'ACCESS1 and ACCESS2 are not routing, so they are like hosts on VLAN 99. Without a gateway they can only answer devices inside 192.168.99.0/24. A PC on 192.168.10.0/24 can send them a ping, but the reply has nowhere to go.',
+     'A <b>default route</b> (0.0.0.0/0) pointing at CORE gives the access switches a way back to every other subnet, so management works from anywhere.',
+     'Give infrastructure fixed, predictable addresses (.1 core, .2 and .3 access). Never hand them out from DHCP.'],
+   cmds:[['interface vlan99','Creates the management interface.'],['ip address 192.168.99.2/24','The switch\'s own address. CORE gets .1 so it can also act as the management gateway.'],
+     ['ip route 0.0.0.0/0 192.168.99.1','Static default route: anything not local goes to CORE. This is what makes replies to other subnets work.'],
+     ['do ping 192.168.10.1','Proves the route works by reaching a gateway in another subnet.']]},
+  {t:'Turn on LLDP',
+   intro:'<b>LLDP</b> (Link Layer Discovery Protocol, IEEE 802.1AB) has each switch announce its name, port and management address to whatever is plugged into each port. Neighbours store these announcements, so every switch can tell you exactly what is on the other end of each cable.',
+   points:['LLDP is off by default on AlliedWare Plus, so you have to turn it on.',
+     'It is the fastest way to check cabling against the design: if CORE port1.0.2 says ACCESS2 port1.0.10, the patch is right.',
+     'It is vendor-neutral, so phones, access points and other brands of switch show up too. Many network management tools build their topology maps from LLDP.',
+     'LLDP only talks to directly connected devices. It never crosses a switch, so you see neighbours, not the whole network.'],
+   cmds:[['lldp run','Starts LLDP on every port of the switch.'],['do show lldp neighbors','Lists each neighbour by port. <code>detail</code> adds the management address and capabilities.']]},
+  {t:'Make CORE the root bridge',
+   intro:'Redundant links stop one cable failure from taking a site down, but Ethernet has no time-to-live, so a loop lets broadcasts circle forever and causes a <b>broadcast storm</b>. <b>Spanning tree</b> prevents this by blocking just enough ports to leave a loop-free tree. AlliedWare Plus runs <b>RSTP</b> (Rapid Spanning Tree, IEEE 802.1w) by default.',
+   points:['The tree is built outward from one switch, the <b>root bridge</b>. The root is the switch with the lowest <b>bridge ID</b>: priority first (default 32768), then MAC address to break the tie.',
+     'With every priority left at default, the oldest switch (lowest MAC) usually wins. That could be an access switch in a cupboard, and then traffic takes odd paths and the wrong links get blocked.',
+     'Setting CORE to <b>4096</b> makes it root on purpose, and keeps it root when new switches are added later. Priority goes in steps of 4096.',
+     'Every other switch then keeps its best path to CORE and blocks the rest. In this lab that is the ACCESS1 to ACCESS2 cross link and the second CORE to ACCESS1 cable.'],
+   cmds:[['spanning-tree priority 4096','Lowers CORE\'s bridge priority so it wins the root election.'],['show spanning-tree brief','Shows the root bridge and each port\'s role and state. Look for the Discarding ports.']]},
+  {t:'Bundle the ACCESS1 uplinks with LACP',
+   intro:'There are two cables between CORE and ACCESS1, but spanning tree sees them as a loop and blocks one. <b>Link aggregation</b> bundles them into one logical link, so spanning tree sees a single port and both cables carry traffic. <b>LACP</b> (IEEE 802.3ad, now 802.1AX) is the protocol the two switches use to agree on the bundle.',
+   points:['You get both bandwidth and resilience: traffic is shared across the members, and if one cable fails the bundle stays up on the other with no spanning tree change.',
+     'Traffic is shared per flow, not per frame, using addresses to pick a member. One single transfer still uses one cable; many transfers spread out.',
+     'LACP checks the far end is configured to match before a link joins. A static bundle does not, so a mis-patched cable in a static group can cause a loop. That check is why LACP is preferred.',
+     '<b>Active</b> means the port sends LACP messages; <b>passive</b> only replies. At least one end must be active. Active on both is the simple, safe choice.',
+     'The bundle appears as interface <code>po1</code> for channel group 1. VLAN settings go on <code>po1</code>, not the member ports, so every member always matches.'],
+   cmds:[['interface port1.0.1,port1.0.3','Selects both CORE ports to ACCESS1 together (port1.0.9-1.0.10 on ACCESS1).'],['channel-group 1 mode active','Joins them to LACP group 1 and starts negotiating. This creates <code>po1</code>.'],
+     ['interface po1','Selects the aggregated link as one interface.'],['switchport mode trunk','Makes the whole bundle a trunk.'],['switchport trunk allowed vlan add 10,20,99','Carries the three VLANs over the bundle, just like the single trunk before.'],
+     ['do show etherchannel','Checks both members are in the bundle and in sync with the far end.']]},
+  {t:'Set the edge ports',
+   intro:'Spanning tree treats every new link as a possible loop. A normal port must wait or negotiate before it forwards, and every time it comes up it tells the network the topology has changed, which flushes MAC tables. Ports with only a PC or camera on them can never form a loop, so that caution only slows things down.',
+   points:['An <b>edge port</b> goes straight to forwarding when the link comes up, so a PC gets its DHCP address and a camera starts streaming without delay.',
+     'Edge ports also do not send topology change notices when they go up and down, so a user turning their PC off does not disturb the rest of the network.',
+     'If an edge port does receive a spanning tree BPDU, AlliedWare Plus treats it as a normal port again. Never set edge on a port towards another switch.',
+     'In production, pair edge ports with <code>spanning-tree bpdu-guard</code> so a port shuts down if someone plugs a switch into a desk socket.'],
+   cmds:[['interface port1.0.1-1.0.2','Selects the two host ports on each access switch.'],['spanning-tree edgeport','Marks them as edge ports.'],['do show spanning-tree','Shows the edge setting for each port.']]},
+  {t:'Lock down the cameras with an ACL',
+   intro:'An <b>access control list</b> is an ordered list of permit and deny rules. AlliedWare Plus hardware ACLs (numbers <b>3000-3699</b>) match on IP source and destination and are applied to a port with <code>access-group</code>. They filter in the switch hardware, so there is no speed cost.',
+   points:['Rules are checked <b>top down and the first match wins</b>. The permit for camera to CCTV traffic must come before the broad deny, or the deny would catch everything.',
+     'Traffic that matches no rule is <b>permitted</b> on a hardware ACL. That is why the explicit <code>deny ... any</code> is needed to block anything.',
+     'Filtering <b>inbound on the camera\'s own port</b> stops unwanted traffic at the edge, before it uses any uplink or reaches the router.',
+     'PC2 to CAM1 fails even though the ACL only looks at traffic from the camera: PC2\'s ping arrives, but CAM1\'s reply (from 192.168.20.x to 192.168.10.x) is dropped as it enters the switch. Cameras are a common way into networks, so keeping them talking only to the NVR limits damage if one is compromised.'],
+   cmds:[['access-list 3000 permit ip 192.168.20.0/24 192.168.20.0/24','Rule 1: CCTV devices may talk to each other, so CAM1 still reaches NVR1.'],
+     ['access-list 3000 deny ip 192.168.20.0/24 any','Rule 2: anything else from the CCTV subnet is dropped.'],['interface port1.0.2','Selects CAM1\'s port.'],
+     ['access-group 3000','Applies the ACL to traffic entering this port.'],['do show access-list','Shows the rules in the order they are checked.']]},
+  {t:'Hand out addresses with DHCP',
+   intro:'<b>DHCP</b> gives hosts their IP address, mask and gateway automatically, so nobody has to type them in on every PC, and two devices can never be given the same address. It is a four-step exchange: the host broadcasts a <b>Discover</b>, the server <b>Offers</b> an address, the host <b>Requests</b> it and the server <b>Acknowledges</b>.',
+   points:['There is one <b>pool</b> per subnet. The server picks the pool whose network matches the interface the request arrived on, so a PC in VLAN 10 gets a 192.168.10.x address.',
+     'The <b>range</b> (.100 to .199) leaves the rest of the subnet free for things that need a fixed address: the gateway, switches, printers and the NVR.',
+     '<b>default-router</b> tells clients their gateway. Without it they get an address but can only reach their own subnet.',
+     'CORE has an interface in each VLAN, so it hears the broadcasts directly. If the server were somewhere else, the gateway would need a <b>DHCP relay</b> to forward requests across the router.',
+     'Pools do nothing until <code>service dhcp-server</code> turns the server on.'],
+   cmds:[['ip dhcp pool DATA','Creates the pool for the Data VLAN and enters pool configuration.'],['network 192.168.10.0/24','Ties the pool to the subnet and sets the mask clients receive.'],
+     ['range 192.168.10.100 192.168.10.199','The addresses that can be leased.'],['default-router 192.168.10.1','The gateway handed to clients, CORE\'s VLAN 10 address.'],
+     ['service dhcp-server','Starts the DHCP server.'],['dhcp (on PC1)','Makes the PC ask for an address, so you can test the pool.']]},
+  {t:'Save and prove it',
+   intro:'Every command you type changes the <b>running configuration</b>, which lives in memory. At boot the switch loads the <b>startup configuration</b> from flash. Until you save, a power cut or reload takes the switch back to what it was before you started.',
+   points:['Saving is a deliberate step, and that is a feature: if a change locks you out, a reload gets you back to the last good config.',
+     'A real reload is the only true proof. Configuration that only works in running memory is a fault waiting for the next power cut.',
+     'Before big changes, <code>copy running-config backup.cfg</code> keeps a copy you can return to.'],
+   cmds:[['write','Saves the running config to the startup config. Same as <code>copy running-config startup-config</code>.'],['show startup-config','Checks what will load at the next boot.'],
+     ['reload','Restarts the switch from the startup config, proving the saved config works on its own.']]},
+];
+function renderTheory(){$('#pane-theory').innerHTML='<p class="msg">Why each exercise matters and what every command does. Open one alongside its exercise.</p>'+THEORY.map((x,i)=>`<details class="task theory" id="theory-${i}"><summary class="task-h"><span class="num">${String(i+1).padStart(2,'0')}</span><h3>${esc(x.t)}</h3></summary>
+  <p>${x.intro}</p><ul>${x.points.map(p=>`<li>${p}</li>`).join('')}</ul><table>${x.cmds.map(([c,w])=>`<tr><td>${esc(c)}</td><td>${w}</td></tr>`).join('')}</table></details>`).join('');}
+function openTheory(i){selectTab('tab-theory');const el=$('#theory-'+i);if(!el)return;el.open=true;el.scrollIntoView({block:'start'});el.querySelector('summary').focus();}
+
 /* ================= Persistence ================= */
 const KEY='awplus-testlab-v1',SBKEY='awplus-testlab-sandbox-v1',MODEKEY='awplus-testlab-mode';
 function snapshot(){const o={v:1,scenario:currentScen,devices:{}};for(const id in D)o.devices[id]={cfg:D[id].cfg,startup:D[id].startup,leases:D[id].leases,files:D[id].files,clockOff:D[id].clockOff||0};
@@ -1501,7 +1626,7 @@ function renderChecks(){
   if(net.storms.length){const devs=new Set(),vl=new Set();for(const comp of net.storms)for(const n of comp){const [id,v]=n.split('|');if(D[id].def.kind==='switch'){devs.add(devLabel(id));vl.add(+v);}}
     warn=`<li class="warn"><span class="dot" aria-hidden="true"></span><span><b>Loop detected:</b> broadcast storm in VLAN ${fmtVlans([...vl])} across ${[...devs].join(', ')}. Traffic in those VLANs is failing.</span></li>`;}
   $('#tests').innerHTML=warn+TESTS.map(t=>{const ok=testOk(t);return `<li><span class="dot ${ok?'ok':''}" aria-hidden="true"></span><span>${t.label}${t.note?` <span style="color:var(--muted)">· ${t.note}</span>`:''}</span><span class="ip">${t.blocked?(ok?'blocked':'not blocked'):(ok?'reachable':'fails')}</span></li>`;}).join('');
-  $('#pane-ex').innerHTML=EXERCISES.map((e,i)=>{const ok=!!e.check();return `<article class="task ${ok?'done':'todo'}"><div class="task-h"><span class="num">${String(i+1).padStart(2,'0')}</span><h3>${e.t}</h3><span class="state">${ok?'Done':'To do'}</span></div><p>${e.d}</p><details><summary>Show example commands</summary><pre>${esc(e.sol)}</pre></details></article>`;}).join('')+
+  $('#pane-ex').innerHTML=EXERCISES.map((e,i)=>{const ok=!!e.check();return `<article class="task ${ok?'done':'todo'}"><div class="task-h"><span class="num">${String(i+1).padStart(2,'0')}</span><h3>${e.t}</h3><span class="state">${ok?'Done':'To do'}</span></div><p>${e.d}</p><details><summary>Show example commands</summary><pre>${esc(e.sol)}</pre></details><button class="linkbtn" type="button" data-theory="${i}">Why? Read the theory</button></article>`;}).join('')+
     `<p class="msg">Checks run live after every command. Hosts are pre-addressed: PCs in 192.168.10.0/24, CCTV in 192.168.20.0/24, gateways on .1.</p>`;
   const allOk=allTests();
   $('#pane-ft').innerHTML=Object.entries(SCENARIOS).filter(([k])=>k!=='factory').map(([k,sc])=>{const cur=k===currentScen;
@@ -1700,6 +1825,7 @@ function boot(){
   let armed=null;
   const arm=(btn,label,fn)=>{if(armed===btn){armed=null;fn();return;}if(armed)armed.textContent=armed.dataset.label;armed=btn;btn.dataset.label=btn.textContent;btn.textContent=label;
     setTimeout(()=>{if(armed===btn){btn.textContent=btn.dataset.label;armed=null;}},3500);};
+  $('#pane-ex').addEventListener('click',e=>{const b=e.target.closest('button[data-theory]');if(b)openTheory(+b.dataset.theory);});
   $('#pane-ft').addEventListener('click',e=>{const b=e.target.closest('button[data-scen]');if(!b)return;arm(b,'Click again to replace the current lab',()=>{loadScenario(b.dataset.scen);active='SW1';afterCommand();});});
   $('#btnReset').addEventListener('click',e=>arm(e.currentTarget,mode==='sandbox'?'Click again to wipe every config':'Click again to wipe everything',()=>{
     if(mode==='sandbox'){sbFactoryAll();sbMsg('Every device is back to factory defaults. Equipment and cables are kept.');}else{loadScenario('factory');active='SW1';}afterCommand();applyModeUI();}));
@@ -1731,7 +1857,7 @@ function boot(){
   $('#mOk').addEventListener('click',async()=>{
     if(mMode==='export'){try{await navigator.clipboard.writeText($('#mArea').value);$('#mMsg').textContent='Copied.';}catch(err){$('#mArea').select();$('#mMsg').textContent='Copy was blocked. The text is selected: press Ctrl+C.';}}
     else{try{const o=JSON.parse($('#mArea').value);save();applySnapshot(o);active=Object.keys(D)[0]||null;if(D.SW1)active='SW1';applyModeUI();fitTopo();afterCommand();modal.hidden=true;}catch(err){$('#mMsg').textContent='Could not load: '+err.message+'.';}}});
-  renderRef();applyModeUI();refresh();
+  renderRef();renderTheory();applyModeUI();refresh();
 }
 if(typeof document!=='undefined')document.addEventListener('DOMContentLoaded',boot);
 </script>
