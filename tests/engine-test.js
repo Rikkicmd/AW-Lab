@@ -5,11 +5,12 @@ const { chromium } = require('playwright');
 
 const EXPECT = {
   // live connectivity tests (6) and exercise checks (13), 1 = pass
-  factory: { tests: '110000', ex: '0000000000000' },
-  solved: { tests: '111111', ex: '1111111111111' },
-  cctv: { tests: '100010', ex: '1110001101011' },
-  data: { tests: '010101', ex: '1100001101001' },
-  mgmt: { tests: '111110', ex: '1111101101111' },
+  factory: { tests: '110000', ex: '000000000000000' },
+  solved: { tests: '111111', ex: '111111111111111' },
+  cctv: { tests: '100010', ex: '111000110101011' },
+  data: { tests: '010101', ex: '110000110100011' },
+  mgmt: { tests: '111110', ex: '111110110111111' },
+  hotdesk: { tests: '010101' },
   dhcp: { tests: '101011' },
   storm: { tests: '000000' },
   lacp: { tests: '000001' },
@@ -47,6 +48,8 @@ const EXPECT = {
       () => both.forEach(id => run(id, [ct, 'interface port1.0.1-1.0.2', 'spanning-tree edgeport'])),
       () => run('SW2', [ct, 'access-list 3000 permit ip 192.168.20.0/24 192.168.20.0/24', 'access-list 3000 deny ip 192.168.20.0/24 any', 'interface port1.0.2', 'access-group 3000']),
       () => { run('SW1', [ct, 'ip dhcp pool DATA', 'network 192.168.10.0/24', 'range 192.168.10.100 192.168.10.199', 'default-router 192.168.10.1', 'exit', 'ip dhcp pool CCTV', 'network 192.168.20.0/24', 'range 192.168.20.100 192.168.20.199', 'default-router 192.168.20.1', 'exit', 'service dhcp-server']); invalidate(); S.PC1.sink = []; hostCmd('PC1', 'dhcp'); delete S.PC1.sink; },
+      () => both.forEach(id => run(id, [ct, 'interface port1.0.1-1.0.2', 'switchport port-security', 'switchport port-security violation shutdown'])),
+      () => both.forEach(id => run(id, [ct, 'loop-protection loop-detect', 'interface port1.0.1-1.0.2', 'loop-protection action link-down'])),
       () => all.forEach(id => run(id, ['write'])),
     ];
     res.course = steps.map(f => { f(); invalidate(); return ex(); });
@@ -91,6 +94,37 @@ const EXPECT = {
     run('SW3', ['configure terminal', 'interface port1.0.10', 'speed auto']); invalidate();
     res.speedUp = physUp(LINKS[2]);
     res.help = helpList(D.SW1, { mode: 'if-port' }, 'channel-group 1 mode ').join('\n');
+    // port security: a new MAC on a locked port shuts it down; recover it
+    loadScenario('solved'); invalidate();
+    const pc1 = v => { const s = S.PC1; s.sink = []; hostCmd('PC1', v); const o = s.sink.join(' '); delete s.sink; invalidate(); return o; };
+    res.psLearn = run('SW2', ['show port-security interface port1.0.1']);
+    pc1('mac 0050.7966.68aa');
+    res.psViol = { down: !reach('PC1', ipOf('PC2')), status: run('SW2', ['show interface status | include port1.0.1 ']), log: run('SW2', ['show log tail | include PSEC']) };
+    run('SW2', ['configure terminal', 'interface port1.0.1', 'no shutdown']);
+    res.psStill = !reach('PC1', ipOf('PC2'));
+    pc1('mac reset'); run('SW2', ['configure terminal', 'interface port1.0.1', 'no shutdown']);
+    res.psBack = reach('PC1', ipOf('PC2')) && EXERCISES[12].check();
+    run('SW2', ['configure terminal', 'interface port1.0.1', 'switchport port-security violation restrict']); pc1('mac 0050.7966.68ab');
+    res.psRestrict = !reach('PC1', ipOf('PC2')) && run('SW2', ['show interface status | include port1.0.1 ']).includes('connected') && run('SW2', ['show port-security intrusion']).includes('0050.7966.68ab');
+    pc1('mac reset');
+    res.psTrunk = run('SW2', ['configure terminal', 'interface port1.0.1', 'switchport mode trunk']).includes('% Port security is enabled');
+    // hot desk ticket: clear the stale address, no shutdown, dhcp
+    loadScenario('hotdesk'); invalidate();
+    res.hdStatus = run('SW2', ['show interface status | include port1.0.1 ']);
+    run('SW2', ['clear mac address-table dynamic interface port1.0.1', 'configure terminal', 'interface port1.0.1', 'no shutdown']); pc1('dhcp');
+    res.hdFixed = tests();
+    // loop protection: storm ticket, turn loop detection back on on ACCESS2 only
+    loadScenario('storm'); invalidate();
+    run('SW3', ['configure terminal', 'loop-protection loop-detect']); invalidate();
+    res.ldp = { tests: tests(), storms: buildNet().storms.length, show: run('SW3', ['show loop-protection interface port1.0.8']) };
+    // CLI realism: no forms, write terminal, help
+    loadScenario('solved');
+    res.noIf = run('SW1', ['configure terminal', 'interface vlan30', 'exit', 'no interface vlan30', 'no interface vlan1']);
+    res.noIfOk = !D.SW1.cfg.vifs[30] && res.noIf.includes('% vlan1 cannot be removed');
+    run('SW2', ['configure terminal', 'no access-list 3000 deny ip 192.168.20.0/24 any']);
+    res.noAce = D.SW2.cfg.acls[3000].length === 1;
+    res.wrt = run('SW1', ['write terminal']).includes('hostname CORE');
+    res.psHelp = helpList(D.SW2, { mode: 'if-port' }, 'switchport port-security violation ').join('\n');
     return res;
   });
 
@@ -102,7 +136,13 @@ const EXPECT = {
   }
   const extra = [['storm has a loop', r.storm.storms > 0], ['storm fixed', r.stormFixed.tests === '111111' && r.stormFixed.storms === 0 && r.stormFixed.cross === 'blocked'],
     ['lacp fixed', r.lacpFixed.tests === '111111'], ['dhcp fixed', r.dhcpFixed.tests === '111111'], ['config round trip', r.roundTrip && r.rt2], ['backup restore', r.restore], ['pipe include', r.pipeOk],
-    ['ntp sync', r.ntp.includes('synchronized, stratum 5')], ['speed mismatch drops link', r.speedDown], ['speed auto restores link', r.speedUp], ['solved has no loop', r.solved.storms === 0], ['factory has no loop', r.factory.storms === 0]];
+    ['ntp sync', r.ntp.includes('synchronized, stratum 5')], ['speed mismatch drops link', r.speedDown], ['speed auto restores link', r.speedUp], ['solved has no loop', r.solved.storms === 0], ['factory has no loop', r.factory.storms === 0],
+    ['port security learns the host', r.psLearn.includes('Total MAC Addresses           : 1') && r.psLearn.includes('LOCKED')],
+    ['port security shuts the port on a new MAC', r.psViol.down && r.psViol.status.includes('err-disabled') && r.psViol.log.includes('0050.7966.68aa')],
+    ['no shutdown alone does not beat port security', r.psStill], ['port security recovers', r.psBack], ['port security restrict keeps link up', r.psRestrict], ['port security refuses trunks', r.psTrunk],
+    ['hot desk ticket starts err-disabled', r.hdStatus.includes('err-disabled')], ['hot desk ticket fixed', r.hdFixed === '111111'],
+    ['loop protection stops the storm', r.ldp.storms === 0 && r.ldp.tests === '111111' && r.ldp.show.includes('Blocking')],
+    ['no interface vlan', r.noIfOk], ['no access-list entry', r.noAce], ['write terminal', r.wrt], ['port security help', r.psHelp.includes('shutdown') && r.psHelp.includes('restrict')]];
   for (const [n, ok] of extra) { if (!ok) fail++; console.log(`${ok ? 'PASS' : 'FAIL'} ${n}`); }
   const courseBad = r.course.map((e, i) => e === '1'.repeat(i + 1) + '0'.repeat(e.length - i - 1) ? null : `step ${i + 1}: ${e}`).filter(Boolean);
   console.log(`${courseBad.length ? 'FAIL' : 'PASS'} course walkthrough completes each exercise in order${courseBad.length ? ' (' + courseBad.join(', ') + ')' : ''}`); if (courseBad.length) fail++;
@@ -121,6 +161,13 @@ const EXPECT = {
   const p2 = await p.textContent('#prompt');
   await t('ssh 192.168.99.3');
   const p3 = await p.textContent('#out');
+  // --More-- paging: long output stops, space pages, q quits, terminal length 0 turns it off
+  await t('show running-config');
+  const m1 = await p.textContent('#prompt'); await p.press('#cmd', ' '); await p.press('#cmd', 'q');
+  const m2 = await p.textContent('#prompt'); await t('terminal length 0'); const n0 = (await p.textContent('#out')).split('\n').length; await t('show running-config');
+  const m3 = await p.textContent('#prompt'); const n1 = (await p.textContent('#out')).split('\n').length;
+  const moreOk = m1 === '--More--' && m2 === 'CORE#' && m3 === 'CORE#' && n1 - n0 > 40;
+  console.log(`${moreOk ? 'PASS' : 'FAIL'} --More-- paging (${m1} / ${m2} / ${m3})`); if (!moreOk) fail++;
   const remoteOk = p1 === 'ACCESS1>' && p2 === 'CORE#' && p3.includes('port 22: Connection refused');
   console.log(`${remoteOk ? 'PASS' : 'FAIL'} telnet/ssh sessions (${p1} / ${p2})`); if (!remoteOk) fail++;
   // sandbox: add equipment, cable it, configure it, remove it; the lessons lab must be untouched

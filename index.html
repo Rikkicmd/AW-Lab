@@ -352,17 +352,18 @@ function factoryCfg(def){
 function pwHash(pw){let a=0x811c9dc5,b=0x01000193;for(const ch of String(pw)){a=Math.imul(a^ch.charCodeAt(0),16777619)>>>0;b=Math.imul(b^ch.charCodeAt(0),2246822519)>>>0;}
   return '$1$'+a.toString(36).padStart(7,'0')+'$'+b.toString(36).padStart(7,'0')+(a^b).toString(36).padStart(7,'0');}
 function extraDefaults(){return {users:{manager:{priv:15,hash:pwHash('friend')}},banner:null,tz:null,ssh:false,telnet:true,
-  snmp:{enabled:false,communities:{},location:'',contact:''},ntp:{servers:[],master:null},dns:{servers:[],domain:null},lines:{con:null,vty:null}};}
-function newPort(){return {speed:'auto',duplex:'auto',admin:true,desc:'',mode:'access',access:1,allowed:{type:'list',list:[]},native:1,agg:null,lacp:null,acl:null,stp:{edge:false,cost:null,prio:128}};}
+  snmp:{enabled:false,communities:{},location:'',contact:''},ntp:{servers:[],master:null},dns:{servers:[],domain:null},lines:{con:null,vty:null},ldp:{on:false,interval:10}};}
+function newPort(){return {speed:'auto',duplex:'auto',admin:true,desc:'',mode:'access',access:1,allowed:{type:'list',list:[]},native:1,agg:null,lacp:null,acl:null,stp:{edge:false,cost:null,prio:128},ps:{on:false,max:1,viol:'protect'},lp:{action:'vlan-disable',timeout:7}};}
 function normalizeCfg(def,cfg){ // upgrade labs saved by v1
   if(def.kind!=='switch')return cfg;
   for(const [k,v] of Object.entries(extraDefaults()))if(cfg[k]===undefined)cfg[k]=v;
   cfg.aggs=cfg.aggs||{};cfg.acls=cfg.acls||{};cfg.dhcp=cfg.dhcp||{service:false,pools:{}};cfg.stp=cfg.stp||{enabled:true,mode:'rstp',priority:32768};
-  for(const n of portNames(def)){const p=cfg.ports[n]=Object.assign(newPort(),cfg.ports[n]||{});p.stp=Object.assign({edge:false,cost:null,prio:128},p.stp||{});}
+  for(const n of portNames(def)){const p=cfg.ports[n]=Object.assign(newPort(),cfg.ports[n]||{});p.stp=Object.assign({edge:false,cost:null,prio:128},p.stp||{});p.ps=Object.assign({on:false,max:1,viol:'protect'},p.ps||{});p.lp=Object.assign({action:'vlan-disable',timeout:7},p.lp||{});}
   for(const a of Object.values(cfg.aggs)){a.stp=Object.assign({edge:false,cost:null,prio:128},a.stp||{});if(a.acl===undefined)a.acl=null;}
   return cfg;
 }
-const freshDev=def=>({def,cfg:factoryCfg(def),startup:null,boot:Date.now(),leases:{},files:{},log:[],clockOff:0});
+const freshDev=def=>({def,cfg:factoryCfg(def),startup:null,boot:Date.now(),leases:{},files:{},log:[],clockOff:0,psec:{}});
+const macOf=id=>(D[id].def.kind==='host'&&D[id].cfg.mac)||D[id].def.mac;
 for(const def of DEFS)D[def.id]=freshDev(def);
 
 /* ================= Sandbox: user-built topology ================= */
@@ -422,7 +423,7 @@ function untaggedVlan(cfg,p){if(p.mode==='access')return vlanActive(cfg,p.access
 function taggedVlans(cfg,p){if(p.mode!=='trunk')return [];return Object.keys(cfg.vlans).map(Number).filter(v=>v!==p.native&&vlanActive(cfg,v)&&allowedHas(p,v));}
 const carries=(cfg,p,v)=>untaggedVlan(cfg,p)===v||taggedVlans(cfg,p).includes(v);
 function linkAt(id,port){for(const l of LINKS){if(l.a[0]===id&&l.a[1]===port)return {link:l,peer:l.b};if(l.b[0]===id&&l.b[1]===port)return {link:l,peer:l.a};}return null;}
-function adminUp(id,port){const d=D[id];if(d.def.kind==='host')return true;const p=d.cfg.ports[port];if(!p.admin)return false;if(p.agg&&d.cfg.aggs[p.agg]&&!d.cfg.aggs[p.agg].admin)return false;return true;}
+function adminUp(id,port){const d=D[id];if(d.def.kind==='host')return true;const p=d.cfg.ports[port];if(!p.admin)return false;if(p.agg&&d.cfg.aggs[p.agg]&&!d.cfg.aggs[p.agg].admin)return false;if(d.psec&&d.psec[port]&&d.psec[port].down)return false;if(protect().down.has(id+'|'+port))return false;return true;}
 const spd=(id,pn)=>D[id].def.kind==='host'?'auto':D[id].cfg.ports[pn].speed;
 const speedOk=l=>{const a=spd(l.a[0],l.a[1]),b=spd(l.b[0],l.b[1]);return a==='auto'||b==='auto'||a===b;};
 const physUp=l=>adminUp(l.a[0],l.a[1])&&adminUp(l.b[0],l.b[1])&&speedOk(l);
@@ -473,17 +474,53 @@ function lpRole(id,lp){
   const r=stpCalc().roles[id][lp];if(r)return {...r,fwd:r.role!=='alternate'};
   return {role:'designated',fwd:true,db:bidStr(id)};
 }
-const fwdEnd=(id,pn)=>D[id].def.kind==='host'||lpRole(id,logName(id,pn)).fwd;
+const fwdEnd=(id,pn)=>D[id].def.kind==='host'||(lpRole(id,logName(id,pn)).fwd&&!protect().drop.has(id+'|'+pn));
+const vlanBlocked=(id,pn,v)=>protect().vlan.has(id+'|'+pn+'|'+v);
 const linkUsable=l=>linkActive(l)&&fwdEnd(l.a[0],l.a[1])&&fwdEnd(l.b[0],l.b[1]);
-function egress(id,port){const d=D[id];if(d.def.kind==='host')return [{v:0,tagged:false}];const p=effPort(d.cfg,port),u=untaggedVlan(d.cfg,p),r=[];if(u!==null)r.push({v:u,tagged:false});for(const v of taggedVlans(d.cfg,p))r.push({v,tagged:true});return r;}
-function ingress(id,port,f){const d=D[id];if(d.def.kind==='host')return f.tagged?null:0;const p=effPort(d.cfg,port);if(!f.tagged)return untaggedVlan(d.cfg,p);return taggedVlans(d.cfg,p).includes(f.v)?f.v:null;}
+function egress(id,port){const d=D[id];if(d.def.kind==='host')return [{v:0,tagged:false}];const p=effPort(d.cfg,port),u=untaggedVlan(d.cfg,p),r=[];if(u!==null)r.push({v:u,tagged:false});for(const v of taggedVlans(d.cfg,p))r.push({v,tagged:true});return r.filter(f=>!vlanBlocked(id,port,f.v));}
+function ingress(id,port,f){const d=D[id];if(d.def.kind==='host')return f.tagged?null:0;const p=effPort(d.cfg,port);const v=!f.tagged?untaggedVlan(d.cfg,p):(taggedVlans(d.cfg,p).includes(f.v)?f.v:null);return v!==null&&vlanBlocked(id,port,v)?null:v;}
 function vifUp(id,v){
   const key='vif:'+id+':'+v;if(key in CACHE)return CACHE[key];
   const d=D[id],c=d.cfg,x=c.vifs[v];let r=false;
-  if(x&&x.admin&&vlanActive(c,v))r=portNames(d.def).some(pn=>{const k=linkAt(id,pn);return k&&linkUsable(k.link)&&carries(c,effPort(c,pn),v);});
+  if(x&&x.admin&&vlanActive(c,v))r=portNames(d.def).some(pn=>{const k=linkAt(id,pn);return k&&linkUsable(k.link)&&carries(c,effPort(c,pn),v)&&!vlanBlocked(id,pn,v);});
   return CACHE[key]=r;
 }
-function buildNet(){
+/* Port protections. Port security learns the MAC of the host on each secured port (state kept in d.psec) and acts on
+   intruders; loop protection (LDF) finds ports that sit on a loop and blocks them until the loop is gone. Both are worked out
+   once per cache generation, before the forwarding graph is built; the sets are visible while they are being computed. */
+function psecLearn(){for(const id in D){const d=D[id];if(d.def.kind!=='switch')continue;d.psec=d.psec||{};
+  for(const pn of portNames(d.def)){const p=d.cfg.ports[pn];if(!p.ps.on||p.mode!=='access'||p.agg){delete d.psec[pn];continue;}
+    const st=d.psec[pn]=d.psec[pn]||{macs:[],count:0,last:null,down:false,cur:null};const x=linkAt(id,pn);
+    if(st.down||!p.admin||!x||D[x.peer[0]].def.kind!=='host'||!speedOk(x.link)){st.cur=null;continue;}
+    const mac=macOf(x.peer[0]);if(st.macs.includes(mac)){st.cur=null;continue;}
+    if(st.macs.length<p.ps.max){st.macs.push(mac);st.cur=null;continue;}
+    if(st.cur!==mac){st.cur=mac;st.count++;st.last=mac;
+      logEv(d,'user.warning',`PSEC[1180]: ${pn}: intrusion detected, MAC ${mac}, action ${p.ps.viol}${p.ps.viol==='shutdown'?': port disabled':''}`);}
+    if(p.ps.viol==='shutdown'){st.down=true;st.cur=null;}else CACHE.prot.drop.add(id+'|'+pn);}}}
+function protect(){if(CACHE.prot)return CACHE.prot;const P=CACHE.prot={down:new Set(),vlan:new Set(),drop:new Set(),why:{}};
+  psecLearn();
+  if(!Object.keys(D).some(id=>D[id].def.kind==='switch'&&D[id].cfg.ldp.on))return P;
+  const reset=()=>{for(const k in CACHE)if(k!=='prot')delete CACHE[k];};
+  for(let i=0;i<48;i++){reset();const net=buildNetRaw();if(!net.storms.length)break;const c=ldCandidate(net);if(!c)break;
+    if(c.whole)P.down.add(c.id+'|'+c.port);else P.vlan.add(c.id+'|'+c.port+'|'+c.v);P.why[c.id+'|'+c.port]=c;}
+  reset();return P;}
+// A port is on the loop when its edge is not a bridge of the storming component. The lowest numbered such port on the first
+// switch running loop detection receives its own LDF back and acts.
+function ldCandidate(net){
+  for(const comp of net.storms){const inC=new Set(comp),E=[],seen=new Set();
+    for(const a of comp)for(const e of net.adj.get(a)||[]){if(!inC.has(e.to))continue;const k=[a+'@'+e.port,e.to+'@'+e.inPort].sort().join('~');if(seen.has(k))continue;seen.add(k);E.push({a,b:e.to,pa:e.port,pb:e.inPort});}
+    const g=new Map();E.forEach((e,i)=>{for(const [x,y] of [[e.a,e.b],[e.b,e.a]]){if(!g.has(x))g.set(x,[]);g.get(x).push([y,i]);}});
+    const disc=new Map(),low=new Map(),bridge=new Set();let t=0;
+    const dfs=(u,pe)=>{disc.set(u,t);low.set(u,t++);for(const [w,i] of g.get(u)||[]){if(i===pe)continue;if(disc.has(w))low.set(u,Math.min(low.get(u),disc.get(w)));else{dfs(w,i);low.set(u,Math.min(low.get(u),low.get(w)));if(low.get(w)>disc.get(u))bridge.add(i);}}};
+    for(const n of g.keys())if(!disc.has(n))dfs(n,-1);
+    const cands=[];E.forEach((e,i)=>{if(bridge.has(i))return;for(const [n,pn] of [[e.a,e.pa],[e.b,e.pb]]){const [id,v]=n.split('|'),d=D[id];
+      if(d.def.kind!=='switch'||!d.cfg.ldp.on||!d.cfg.ports[pn]||d.cfg.ports[pn].agg)continue;const act=d.cfg.ports[pn].lp.action;
+      if(!['link-down','port-disable','vlan-disable'].includes(act))continue;cands.push({id,port:pn,v:+v,whole:act!=='vlan-disable',action:act});}});
+    const ids=Object.keys(D);cands.sort((x,y)=>ids.indexOf(x.id)-ids.indexOf(y.id)||+x.port.split('.')[2]-+y.port.split('.')[2]||x.v-y.v);
+    if(cands.length)return cands[0];}
+  return null;}
+function buildNet(){if(CACHE.net)return CACHE.net;protect();return buildNetRaw();}
+function buildNetRaw(){
   if(CACHE.net)return CACHE.net;
   const adj=new Map(),ekeys=new Set();const addE=(a,b,port,inPort)=>{if(!adj.has(a))adj.set(a,[]);adj.get(a).push({to:b,port,inPort});};
   for(const l of LINKS){if(!linkUsable(l))continue;const ends=[l.a,l.b];
@@ -553,11 +590,14 @@ function swLines(p){
   return L;
 }
 function stpLines(o){const L=[];if(o.stp.edge)L.push(' spanning-tree edgeport');if(o.stp.cost)L.push(' spanning-tree path-cost '+o.stp.cost);if(o.stp.prio!==128)L.push(' spanning-tree priority '+o.stp.prio);return L;}
-const portKey=p=>JSON.stringify([p.mode,p.access,p.allowed,p.native,p.desc,p.admin,p.agg,p.lacp,p.stp,p.acl,p.speed,p.duplex]);
+const portKey=p=>JSON.stringify([p.mode,p.access,p.allowed,p.native,p.desc,p.admin,p.agg,p.lacp,p.stp,p.acl,p.speed,p.duplex,p.ps,p.lp]);
 const aclAddr=a=>a.len===0?'any':a.len===32?'host '+a.net:a.net+'/'+a.len;
 function portLines(p,cfg){
   const L=[];if(p.desc)L.push(' description '+p.desc);
-  const e=p.agg&&cfg.aggs[p.agg]?cfg.aggs[p.agg]:p;L.push(...swLines(e));if(e===p){L.push(...stpLines(p));if(p.acl)L.push(' access-group '+p.acl);}
+  const e=p.agg&&cfg.aggs[p.agg]?cfg.aggs[p.agg]:p;L.push(...swLines(e));
+  if(p.ps.on){L.push(' switchport port-security');if(p.ps.max!==1)L.push(' switchport port-security maximum '+p.ps.max);if(p.ps.viol!=='protect')L.push(' switchport port-security violation '+p.ps.viol);}
+  if(e===p){L.push(...stpLines(p));if(p.acl)L.push(' access-group '+p.acl);}
+  if(p.lp.action!=='vlan-disable')L.push(' loop-protection action '+p.lp.action);if(p.lp.timeout!==7)L.push(' loop-protection timeout '+p.lp.timeout);
   if(e!==p){const n=p.agg.slice(2);L.push(p.agg.startsWith('po')?` channel-group ${n} mode ${p.lacp}`:` static-channel-group ${n}`);}
   if(p.speed!=='auto')L.push(' speed '+p.speed);if(p.duplex!=='auto')L.push(' duplex '+p.duplex);
   if(!p.admin)L.push(' shutdown');return L;
@@ -576,6 +616,7 @@ function configText(def,cfg,only){
     const sl=[];if(!cfg.stp.enabled)sl.push('no spanning-tree enable');if(cfg.stp.mode!=='rstp')sl.push('spanning-tree mode '+cfg.stp.mode);if(cfg.stp.priority!==32768)sl.push('spanning-tree priority '+cfg.stp.priority);
     if(sl.length)L.push(...sl,'!');
     if(cfg.lldp)L.push('lldp run','!');
+    if(cfg.ldp.on)L.push('loop-protection loop-detect ldf-interval '+cfg.ldp.interval,'!');
     const acl=Object.keys(cfg.acls).map(Number).sort((a,b)=>a-b);
     if(acl.length){for(const n of acl)for(const e of cfg.acls[n])L.push(`access-list ${n} ${e.action} ${e.proto} ${aclAddr(e.s)} ${aclAddr(e.d)}`);L.push('!');}
     for(const name of Object.keys(cfg.dhcp.pools).sort()){const x=cfg.dhcp.pools[name];L.push('ip dhcp pool '+name);
@@ -643,6 +684,9 @@ const PARAMS={
   TMIN:{label:'<0-35791>',desc:'Timeout in minutes (0 = never)',test:w=>/^\d+$/.test(w)&&+w<=35791?+w:undefined},
   TSEC:{label:'<0-2147483>',desc:'Timeout in seconds',test:w=>/^\d+$/.test(w)&&+w<=2147483?+w:undefined},
   NUM:{label:'<0-512>',desc:'Number of lines on screen (0 for no pausing)',test:w=>/^\d+$/.test(w)&&+w<=512?+w:undefined},
+  PSMAX:{label:'<0-256>',desc:'Maximum number of MAC addresses learned on the port',test:w=>/^\d+$/.test(w)&&+w<=256?+w:undefined},
+  LDFI:{label:'<1-600>',desc:'Seconds between loop detection frames',test:w=>/^\d+$/.test(w)&&+w>=1&&+w<=600?+w:undefined},
+  LPTO:{label:'<0-86400>',desc:'Seconds before the action is undone (0 = never)',test:w=>/^\d+$/.test(w)&&+w<=86400?+w:undefined},
 };
 const HELP={
   enable:'Turn on privileged mode command',disable:'Turn off privileged mode command',exit:'Exit current mode and down to previous mode',
@@ -693,6 +737,14 @@ const HELP={
   'interface status':'Port status, VLAN, speed and duplex',log:'Buffered system log','show log':'Buffered system log',tail:'Most recent log entries',cpu:'CPU utilisation',memory:'Memory utilisation',
   environment:'Fans, power supplies and temperature',detail:'Detailed information',speed:'Set the port speed',duplex:'Set the port duplex',half:'Half duplex',full:'Full duplex',auto:'Autonegotiate',
   line:'Configure a terminal line',con:'Console line',vty:'Remote login lines','exec-timeout':'Log out idle sessions after this time',
+  'port-security':'Port security: limit the MAC addresses allowed on a port',maximum:'Maximum number of MAC addresses that can be learned',violation:'Action when an unknown MAC address arrives',
+  'violation protect':'Drop frames from unknown MAC addresses (default)','violation restrict':'Drop frames from unknown MAC addresses and count the violation','violation shutdown':'Disable the port when an unknown MAC address arrives',
+  intrusion:'Port security violations','loop-protection':'Loop protection using loop detection frames (LDF)','loop-detect':'Send loop detection frames on every port',
+  'ldf-interval':'Seconds between loop detection frames',action:'What the port does when it receives its own loop detection frame',
+  'action link-down':'Take the link down','action port-disable':'Block the whole port, link stays up','action vlan-disable':'Block only the looping VLAN on the port (default)',
+  'action log-only':'Only log the loop','action none':'Do nothing',timeout:'Seconds before the action is undone','loop-protection timeout':'Seconds before the action is undone',
+  'write terminal':'Write to terminal','terminal no':'Negate a command or set its defaults','no length':'Set the number of lines on a screen back to the default',
+  dynamic:'Dynamically learned entries','clear mac':'MAC address','clear port-security':'Port security',
   'show ip name-server':'DNS servers','show ssh':'SSH information','ssh server':'SSH server settings','show telnet':'Telnet server settings','show interface switchport':'Show VLAN membership information',
 };
 function kwHelp(tokens,i){const path=tokens.slice(0,i+1).map(t=>t.kw||'*').join(' ');const two=i>0&&tokens[i-1].kw?tokens[i-1].kw+' '+tokens[i].kw:null;return HELP[path]||(two&&HELP[two])||HELP[tokens[i].kw]||'';}
@@ -724,7 +776,7 @@ const S={};
 const MAXBUF=4000;
 function out(s,text){if(s.sink){s.sink.push(...String(text).split('\n'));return;}s.buf.push(...String(text).split('\n'));if(s.buf.length>MAXBUF)s.buf.splice(0,s.buf.length-MAXBUF);}
 const SUFFIX={user:'>',priv:'#',config:'(config)#','if-port':'(config-if)#','if-vlan':'(config-if)#',vlandb:'(config-vlan)#',dhcp:'(dhcp-config)#',line:'(config-line)#'};
-function promptFor(d,s){if(s.pending)return s.pending.prompt;if(d.def.kind==='host')return d.def.id+'> ';if(s.login==='user')return d.cfg.hostname+' login: ';if(s.login==='pass')return 'Password: ';return d.cfg.hostname+SUFFIX[s.mode];}
+function promptFor(d,s){if(s.more)return '--More--';if(s.pending)return s.pending.prompt;if(d.def.kind==='host')return d.def.id+'> ';if(s.login==='user')return d.cfg.hostname+' login: ';if(s.login==='pass')return 'Password: ';return d.cfg.hostname+SUFFIX[s.mode];}
 function promptOf(id){const s=S[id];if(s.remote)return promptFor(D[s.remote.id],s.remote.sess);return promptFor(D[id],s);}
 function effOf(id){const s=S[id];return s.remote?{d:D[s.remote.id],s:s.remote.sess}:{d:D[id],s};}
 const fmtLocal=(d,t)=>{const x=new Date(t);const M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];const z=n=>String(n).padStart(2,'0');
@@ -750,7 +802,7 @@ function swTargets(c){const cfg=c.d.cfg;const mem=c.s.ifSel.list.find(n=>!isAggN
   if(mem){const a=cfg.ports[mem].agg;out(c.s,`% ${mem} is a member of ${a}. Configure interface ${a} instead.`);return null;}return portsOf(c);}
 function needVlans(c,list){const miss=list.filter(v=>!c.d.cfg.vlans[v]);if(miss.length){out(c.s,`% VLAN ${fmtVlans(miss)} does not exist`);return false;}return true;}
 function needTrunk(c,T){const i=T.findIndex(p=>p.mode!=='trunk');if(i>=0){out(c.s,`% ${c.s.ifSel.list[i]} is not in trunk mode`);return false;}return true;}
-function logout(c){if(c.s.isRemote){c.s.closed=true;return;}c.s.login='user';c.s.mode='user';c.s.ifSel=null;out(c.s,'');}
+function logout(c){delete c.s.termLen;if(c.s.isRemote){c.s.closed=true;return;}c.s.login='user';c.s.mode='user';c.s.ifSel=null;out(c.s,'');}
 
 async function cmdPing(c){const N=c.a.n||5;
   const {d,s}=c,dst=c.a.dst,r=pingCalc(d.def.id,dst),fast=!!s.sink;
@@ -814,7 +866,7 @@ function rebootDev(id){
   const d=D[id],s=S[id];
   for(const x in S)if(S[x].remote&&S[x].remote.id===id){out(S[x],'');out(S[x],'Connection closed by foreign host.');S[x].remote=null;}
   return (async()=>{out(s,'');out(s,'Rebooting at user request...');render();await sleep(900);
-    d.cfg=clone(bootCfg(d));d.boot=Date.now();d.leases={};invalidate();seedLog(d);s.buf.push('');s.mode='user';s.ifSel=null;
+    d.cfg=clone(bootCfg(d));d.boot=Date.now();d.leases={};d.psec={};invalidate();seedLog(d);s.buf.push('');s.mode='user';s.ifSel=null;
     for(const l of bootLines(d)){out(s,l);render();await sleep(110);}s.login='user';})();
 }
 
@@ -825,7 +877,7 @@ def('priv','disable',c=>{c.s.mode='user';});
 def(U,'exit',logout);def(U,'logout',logout);
 def(U,'ping <IP:dst>',cmdPing);def(U,'ping <IP:dst> repeat <REP:n>',cmdPing);
 def(U,'traceroute <IP:dst>',cmdTrace);
-def(U,'terminal length <NUM:n>',()=>{});
+def(U,'terminal length <NUM:n>',c=>{c.s.termLen=c.a.n;});def(U,'terminal no length',c=>{delete c.s.termLen;});
 def(U,'show version',c=>{const fam=c.d.def.model.split('-')[0];out(c.s,[`AlliedWare Plus (TM) 5.5.3 (simulated training image)`,'',`Build name : ${fam}-5.5.3-sim.rel`,'Build date : Sat Oct 31 2026','Build type : RELEASE',`Platform   : ${c.d.def.model}`,'',
   'This is a browser simulation for training. It contains no Allied Telesis software.'].join('\n'));});
 def(U,'show clock',c=>{const d=c.d,u=devNow(d),z=d.cfg.tz;const f=t=>new Date(t).toUTCString().replace(' GMT','');
@@ -869,16 +921,16 @@ function macRows(id){const d=D[id],net=buildNet(),rows=[];
   for(const v of Object.keys(d.cfg.vlans).map(Number).filter(v=>vlanActive(d.cfg,v)).sort((a,b)=>a-b)){
     const seen=new Set([`${id}|${v}`]),q=(net.adj.get(`${id}|${v}`)||[]).map(e=>({node:e.to,port:e.port}));
     while(q.length){const n=q.shift();if(seen.has(n.node))continue;seen.add(n.node);const [nid,nv]=n.node.split('|');if(nid===id)continue;
-      const pd=D[nid];let mac=null;if(pd.def.kind==='host')mac=pd.def.mac;else if(vifUp(nid,+nv))mac=pd.def.mac;
+      const pd=D[nid];let mac=null;if(pd.def.kind==='host')mac=macOf(nid);else if(vifUp(nid,+nv))mac=pd.def.mac;
       if(mac&&!rows.some(r=>r[0]===v&&r[2]===mac))rows.push([v,logName(id,n.port),mac,'dynamic']);
       for(const e of net.adj.get(n.node)||[])q.push({node:e.to,port:n.port});}
     if(vifUp(id,v))rows.push([v,'CPU',d.def.mac,'static']);}
   return rows;}
 def(U,'show mac address-table',c=>{const L=['VLAN port             mac            fwd'];for(const r of macRows(c.d.def.id))L.push(String(r[0]).padEnd(5)+r[1].padEnd(17)+r[2].padEnd(15)+'forward   '+r[3]);out(c.s,L.join('\n'));});
-def('priv','clear mac address-table dynamic',c=>{out(c.s,'% Dynamic entries cleared. They are relearned as soon as traffic flows.');});
+def('priv','clear mac address-table dynamic',c=>{for(const st of Object.values(c.d.psec||{})){st.macs=[];st.cur=null;}});
 def(U,'show arp',c=>{const d=c.d,id=d.def.id,net=buildNet(),macs=macRows(id),L=['IP Address      MAC Address     Interface       Port          Type'];
   for(const v of Object.keys(d.cfg.vifs).map(Number).sort((a,b)=>a-b)){const x=d.cfg.vifs[v];if(!x.ip||!vifUp(id,v))continue;
-    for(const e of endpoints()){if(e.id===id||!inNet(e.ip,netOf(x.ip,x.len),x.len)||!net.same(e.node,`${id}|${v}`))continue;const mac=D[e.id].def.mac;
+    for(const e of endpoints()){if(e.id===id||!inNet(e.ip,netOf(x.ip,x.len),x.len)||!net.same(e.node,`${id}|${v}`))continue;const mac=macOf(e.id);
       const r=macs.find(m=>m[0]===v&&m[2]===mac);L.push(e.ip.padEnd(16)+mac.padEnd(16)+('vlan'+v).padEnd(16)+(r?r[1]:'-').padEnd(14)+'dynamic');}}
   out(c.s,L.join('\n'));});
 def('priv','clear arp-cache',()=>{});
@@ -917,7 +969,7 @@ def('priv','show running-config interface <IFRANGE:ifs>',c=>out(c.s,configText(c
 def('priv','show startup-config',c=>{if(!c.d.startup){out(c.s,'% Startup configuration file flash:/default.cfg does not exist');return;}out(c.s,configText(c.d.def,c.d.startup));});
 def('priv','configure terminal',c=>{c.s.mode='config';out(c.s,'Enter configuration commands, one per line.  End with CNTL/Z.');});
 const doWrite=c=>{c.d.startup=clone(c.d.cfg);out(c.s,'Building configuration...');out(c.s,'[OK]');};
-def('priv','write',doWrite);def('priv','write memory',doWrite);def('priv','copy running-config startup-config',doWrite);
+def('priv','write',doWrite);def('priv','write terminal',c=>out(c.s,configText(c.d.def,c.d.cfg)));def('priv','write memory',doWrite);def('priv','copy running-config startup-config',doWrite);
 def('priv','erase startup-config',c=>{c.s.pending={prompt:'Delete flash:/default.cfg? (y/n): ',cb:a=>{if(a==='y'){c.d.startup=null;out(c.s,'Deleting..');out(c.s,'Successful operation');}}};});
 def('priv','reload',c=>{const id=c.d.def.id;const ask=()=>{c.s.pending={prompt:'Are you sure you want to reboot the whole chassis? (y/n): ',cb:a=>a==='y'?rebootDev(id):undefined};};
   if(unsaved(c.d)){out(c.s,'The system has unsaved changes.');c.s.pending={prompt:'Would you like to save them now? (y/n): ',cb:a=>{if(a==='y')doWrite(c);ask();}};}else ask();});
@@ -931,6 +983,10 @@ def(ALL,'interface <IFRANGE:ifs>',c=>{const r=c.a.ifs;const miss=r.list.find(n=>
   if(miss){out(c.s,`% Interface ${miss} does not exist. Create it by adding ports with ${miss.startsWith('po')?'channel-group':'static-channel-group'}.`);return;}
   if(r.type==='vlan'){for(const v of r.list)if(!c.d.cfg.vifs[v])c.d.cfg.vifs[v]={ip:null,len:null,admin:true,desc:''};c.s.mode='if-vlan';}else c.s.mode='if-port';c.s.ifSel=r;});
 def('config','vlan database',c=>{c.s.mode='vlandb';});
+def('config','no interface <IFRANGE:ifs>',c=>{const r=c.a.ifs,cfg=c.d.cfg;
+  if(r.type==='port'){const a=r.list.find(isAggName);out(c.s,a?`% ${a} is removed when its last member port leaves the channel group`:'% Physical interfaces cannot be removed');return;}
+  if(r.list.includes(1)){out(c.s,'% vlan1 cannot be removed');return;}const miss=r.list.find(v=>!cfg.vifs[v]);if(miss){out(c.s,`% Interface vlan${miss} does not exist`);return;}
+  for(const v of r.list)delete cfg.vifs[v];});
 def('config','ip route <PREFIX:pfx> <IP:nh>',c=>{const [ip,l]=c.a.pfx.split('/'),len=+l,net=intIp(netOf(ip,len));
   if(c.d.cfg.routes.some(r=>r.net===net&&r.len===len&&r.nh===c.a.nh))return;c.d.cfg.routes.push({net,len,nh:c.a.nh});});
 def('config','no ip route <PREFIX:pfx> <IP:nh>',c=>{const [ip,l]=c.a.pfx.split('/'),len=+l,net=intIp(netOf(ip,len));const i=c.d.cfg.routes.findIndex(r=>r.net===net&&r.len===len&&r.nh===c.a.nh);
@@ -953,7 +1009,7 @@ def('vlandb','no vlan <VLANLIST:vl>',c=>{const cfg=c.d.cfg;if(c.a.vl.includes(1)
 /* ---- port / aggregator interface ---- */
 const T_=c=>swTargets(c);
 def('if-port','switchport mode access',c=>{const T=T_(c);if(!T)return;for(const p of T)p.mode='access';});
-def('if-port','switchport mode trunk',c=>{const T=T_(c);if(!T)return;for(const p of T)if(p.mode!=='trunk'){p.mode='trunk';p.allowed={type:'list',list:[]};p.native=1;}});
+def('if-port','switchport mode trunk',c=>{const T=T_(c);if(!T)return;const ps=c.s.ifSel.list.find((n,i)=>T[i].ps&&T[i].ps.on);if(ps){out(c.s,`% Port security is enabled on ${ps}. Remove it with "no switchport port-security" first.`);return;}for(const p of T)if(p.mode!=='trunk'){p.mode='trunk';p.allowed={type:'list',list:[]};p.native=1;}});
 def('if-port','switchport access vlan <VLANID:v>',c=>{const T=T_(c);if(!T)return;const i=T.findIndex(p=>p.mode!=='access');if(i>=0){out(c.s,`% ${c.s.ifSel.list[i]} is not in access mode`);return;}
   if(!needVlans(c,[c.a.v]))return;for(const p of T)p.access=c.a.v;});
 def('if-port','no switchport access vlan',c=>{const T=T_(c);if(!T)return;for(const p of T)p.access=1;});
@@ -971,6 +1027,7 @@ def('if-port','no switchport trunk native vlan',c=>{const T=T_(c);if(!T||!needTr
 def('if-port','spanning-tree edgeport',c=>{const T=T_(c);if(T)for(const p of T)p.stp.edge=true;});
 def('if-port','spanning-tree portfast',c=>{const T=T_(c);if(T)for(const p of T)p.stp.edge=true;});
 def('if-port','no spanning-tree edgeport',c=>{const T=T_(c);if(T)for(const p of T)p.stp.edge=false;});
+def('if-port','no spanning-tree portfast',c=>{const T=T_(c);if(T)for(const p of T)p.stp.edge=false;});
 def('if-port','spanning-tree path-cost <COST:v>',c=>{const T=T_(c);if(T)for(const p of T)p.stp.cost=c.a.v;});
 def('if-port','no spanning-tree path-cost',c=>{const T=T_(c);if(T)for(const p of T)p.stp.cost=null;});
 def('if-port','spanning-tree priority <PPRIO:v>',c=>{if(c.a.v%16){out(c.s,'% Port priority must be a multiple of 16');return;}const T=T_(c);if(T)for(const p of T)p.stp.prio=c.a.v;});
@@ -1004,7 +1061,7 @@ def('config','no spanning-tree priority',c=>{c.d.cfg.stp.priority=32768;});
 /* ---- shared interface ---- */
 const ifObjs=c=>c.s.ifSel.type==='port'?portsOf(c):c.s.ifSel.list.map(v=>c.d.cfg.vifs[v]);
 def('if-port,if-vlan','shutdown',c=>{for(const x of ifObjs(c))x.admin=false;});
-def('if-port,if-vlan','no shutdown',c=>{for(const x of ifObjs(c))x.admin=true;});
+def('if-port,if-vlan','no shutdown',c=>{for(const x of ifObjs(c))x.admin=true;if(c.s.ifSel.type==='port')for(const n of c.s.ifSel.list){const st=c.d.psec&&c.d.psec[n];if(st){st.down=false;st.cur=null;}}});
 def('if-port,if-vlan','description <LINE:text>',c=>{for(const x of ifObjs(c))x.desc=c.a.text.slice(0,64);});
 def('if-port,if-vlan','no description',c=>{for(const x of ifObjs(c))x.desc='';});
 
@@ -1023,6 +1080,9 @@ function aclAdd(c,action,proto){const n=c.a.n,cfg=c.d.cfg;const src=c.a.src||{ne
   if(list.some(e=>e.action===action&&e.proto===proto&&aclAddr(e.s)===aclAddr(src)&&aclAddr(e.d)===aclAddr(dst)))return;list.push({action,proto,s:src,d:dst});}
 for(const act of ['permit','deny'])for(const proto of ['ip','icmp'])for(const sf of ['<ADDR:src>','host <IP:sh>'])for(const df of ['<ADDR:dst>','host <IP:dh>'])
   def('config',`access-list <ACLNUM:n> ${act} ${proto} ${sf} ${df}`,c=>aclAdd(c,act,proto));
+for(const act of ['permit','deny'])for(const proto of ['ip','icmp'])for(const sf of ['<ADDR:src>','host <IP:sh>'])for(const df of ['<ADDR:dst>','host <IP:dh>'])
+  def('config',`no access-list <ACLNUM:n> ${act} ${proto} ${sf} ${df}`,c=>{const list=c.d.cfg.acls[c.a.n];const src=c.a.src||{net:c.a.sh,len:32},dst=c.a.dst||{net:c.a.dh,len:32};
+    const i=list?list.findIndex(e=>e.action===act&&e.proto===proto&&aclAddr(e.s)===aclAddr(src)&&aclAddr(e.d)===aclAddr(dst)):-1;if(i<0){out(c.s,'% No matching access list entry');return;}list.splice(i,1);});
 def('config','no access-list <ACLNUM:n>',c=>{const cfg=c.d.cfg;if(!cfg.acls[c.a.n]){out(c.s,`% Access list ${c.a.n} does not exist`);return;}
   const used=[...Object.keys(cfg.ports).filter(n=>cfg.ports[n].acl===c.a.n),...Object.keys(cfg.aggs).filter(n=>cfg.aggs[n].acl===c.a.n)];
   if(used.length){out(c.s,`% Access list ${c.a.n} is applied to ${used.join(', ')}. Remove it with "no access-group" first.`);return;}delete cfg.acls[c.a.n];});
@@ -1049,7 +1109,7 @@ def('dhcp','network <IP:ip> <IP:mask>',c=>{const l=maskToLen(c.a.mask);if(l===nu
 def('dhcp','range <IP:a> <IP:b>',c=>{const x=pool(c);if(!x.net){out(c.s,'% Set the pool network first');return;}
   if(!inNet(c.a.a,ipInt(x.net),x.len)||!inNet(c.a.b,ipInt(x.net),x.len)){out(c.s,`% Range must be inside the pool network ${x.net}/${x.len}`);return;}
   if(ipInt(c.a.a)>ipInt(c.a.b)){out(c.s,'% The first address must not be higher than the last');return;}x.range=[c.a.a,c.a.b];});
-def('dhcp','no range',c=>{pool(c).range=null;});
+def('dhcp','no range',c=>{pool(c).range=null;});def('dhcp','no network',c=>{const x=pool(c);x.net=null;x.len=null;x.range=null;});def('dhcp','no lease',c=>{pool(c).lease=[1,0,0];});
 def('dhcp','default-router <IP:ip>',c=>{pool(c).gw=c.a.ip;});def('dhcp','no default-router',c=>{pool(c).gw=null;});
 def('dhcp','dns-server <IP:ip>',c=>{pool(c).dns=c.a.ip;});def('dhcp','no dns-server',c=>{pool(c).dns=null;});
 def('dhcp','lease <DAYS:d> <HOURS:h> <MINS:m>',c=>{if(!c.a.d&&!c.a.h&&!c.a.m){out(c.s,'% Lease time must be greater than zero');return;}pool(c).lease=[c.a.d,c.a.h,c.a.m];});
@@ -1067,7 +1127,7 @@ def(U,'show ip dhcp binding',c=>{const d=c.d,L=[];const by={};for(const m in d.l
   out(c.s,L.length?L.join('\n'):'% No DHCP bindings');});
 def('priv','clear ip dhcp binding all',c=>{c.d.leases={};});
 function dhcpRequest(hid){
-  invalidate();const net=buildNet(),node=`${hid}|0`,mac=D[hid].def.mac;
+  invalidate();const net=buildNet(),node=`${hid}|0`,mac=macOf(hid);
   for(const sid in D){const d=D[sid];if(d.def.kind!=='switch'||!d.cfg.dhcp.service)continue;
     for(const v of Object.keys(d.cfg.vifs).map(Number)){const x=d.cfg.vifs[v];if(!x.ip||!vifUp(sid,v)||!net.same(node,`${sid}|${v}`))continue;
       for(const name of Object.keys(d.cfg.dhcp.pools).sort()){const pl=d.cfg.dhcp.pools[name];if(!pl.net||!pl.range||pl.len!==x.len||!inNet(x.ip,ipInt(pl.net),pl.len))continue;
@@ -1087,11 +1147,60 @@ function physTargets(c){if(c.s.ifSel.list.some(n=>isAggName(String(n)))){out(c.s
 for(const v of ['auto','10','100','1000'])def('if-port',`speed ${v}`,c=>{const T=physTargets(c);if(T)for(const p of T)p.speed=v;});
 for(const v of ['auto','full','half'])def('if-port',`duplex ${v}`,c=>{const T=physTargets(c);if(T)for(const p of T)p.duplex=v;});
 def('if-port','switchport',()=>{});
-def(U,'show interface status',c=>{const d=c.d,id=d.def.id,L=['Port        Name               Status      Vlan   Duplex  Speed   Type'];
+def('if-port','no speed',c=>{const T=physTargets(c);if(T)for(const p of T)p.speed='auto';});
+def('if-port','no duplex',c=>{const T=physTargets(c);if(T)for(const p of T)p.duplex='auto';});
+
+/* ---- port security ---- */
+function psTargets(c){const cfg=c.d.cfg,L=c.s.ifSel.list;if(L.some(n=>isAggName(String(n)))){out(c.s,'% Port security is configured on switch ports, not on aggregators');return null;}
+  const bad=L.find(n=>cfg.ports[n].mode!=='access'||cfg.ports[n].agg);if(bad){out(c.s,`% ${bad} is ${cfg.ports[bad].agg?'a member of '+cfg.ports[bad].agg:'a trunk port'}. Port security works on access ports only.`);return null;}
+  return L.map(n=>cfg.ports[n]);}
+const psReset=(c,n)=>{if(c.d.psec)delete c.d.psec[n];};
+def('if-port','switchport port-security',c=>{const T=psTargets(c);if(T)for(const p of T)p.ps.on=true;});
+def('if-port','no switchport port-security',c=>{const T=psTargets(c);if(!T)return;c.s.ifSel.list.forEach((n,i)=>{T[i].ps.on=false;psReset(c,n);});});
+def('if-port','switchport port-security maximum <PSMAX:n>',c=>{const T=psTargets(c);if(!T)return;c.s.ifSel.list.forEach((n,i)=>{T[i].ps.max=c.a.n;const st=c.d.psec&&c.d.psec[n];if(st)st.macs=st.macs.slice(0,c.a.n);});});
+def('if-port','no switchport port-security maximum',c=>{const T=psTargets(c);if(!T)return;c.s.ifSel.list.forEach((n,i)=>{T[i].ps.max=1;const st=c.d.psec&&c.d.psec[n];if(st)st.macs=st.macs.slice(0,1);});});
+for(const v of ['protect','restrict','shutdown'])def('if-port',`switchport port-security violation ${v}`,c=>{const T=psTargets(c);if(T)for(const p of T)p.ps.viol=v;});
+def('if-port','no switchport port-security violation',c=>{const T=psTargets(c);if(T)for(const p of T)p.ps.viol='protect';});
+function psShow(c,names,intr){const d=c.d,L=[];
+  for(const n of names){if(isAggName(n)){out(c.s,`% Port security is not supported on ${n}`);return;}const p=d.cfg.ports[n],st=(d.psec||{})[n]||{macs:[],count:0,last:null,down:false};
+    if(intr){if(!p.ps.on)continue;L.push(`Port ${n}: Intrusion count ${st.count}`,st.last?`  Last intruder MAC address : ${st.last}`:'  No intrusions detected','');continue;}
+    L.push(`Port Security configuration for ${n}`,`Security Enabled              : ${p.ps.on?'YES':'NO'}`);
+    if(p.ps.on)L.push(`Port Status                   : ${st.down?'SHUTDOWN (security violation)':'ENABLED'}`,`Violation Mode                : ${p.ps.viol.toUpperCase()}`,'Aging                         : OFF',
+      `Maximum MAC Addresses         : ${p.ps.max}`,`Total MAC Addresses           : ${st.macs.length}`,`Lock Status                   : ${st.macs.length>=p.ps.max?'LOCKED':'UNLOCKED'}`,
+      `Security Violation Count      : ${st.count}`,`Last Violation Source Address : ${st.last||'None'}`,...(st.macs.length?['Learned MAC Addresses         : '+st.macs.join(', ')]:[]));
+    L.push('');}
+  out(c.s,L.join('\n').trimEnd()||'% No ports have port security enabled');}
+const ifPorts=r=>r.type==='port'?r.list:null;
+def(U,'show port-security interface <IFRANGE:ifs>',c=>{const n=ifPorts(c.a.ifs);if(!n){out(c.s,'% Port security applies to switch ports');return;}psShow(c,n);});
+def(U,'show port-security intrusion',c=>psShow(c,portNames(c.d.def),true));
+def(U,'show port-security intrusion interface <IFRANGE:ifs>',c=>{const n=ifPorts(c.a.ifs);if(!n){out(c.s,'% Port security applies to switch ports');return;}psShow(c,n,true);});
+def('priv','clear port-security intrusion',c=>{for(const st of Object.values(c.d.psec||{})){st.count=0;st.last=null;}});
+def('priv','clear mac address-table dynamic interface <IFRANGE:ifs>',c=>{const n=ifPorts(c.a.ifs);if(!n){out(c.s,'% Specify switch ports, for example port1.0.1');return;}for(const x of n){const st=c.d.psec&&c.d.psec[x];if(st){st.macs=[];st.cur=null;}}});
+
+/* ---- loop protection ---- */
+def('config','loop-protection loop-detect',c=>{c.d.cfg.ldp.on=true;});
+def('config','loop-protection loop-detect ldf-interval <LDFI:n>',c=>{c.d.cfg.ldp.on=true;c.d.cfg.ldp.interval=c.a.n;});
+def('config','no loop-protection loop-detect',c=>{c.d.cfg.ldp.on=false;c.d.cfg.ldp.interval=10;});
+const lpTargets=c=>{if(c.s.ifSel.list.some(n=>isAggName(String(n)))){out(c.s,'% Loop protection is configured on switch ports, not on aggregators');return null;}return c.s.ifSel.list.map(n=>c.d.cfg.ports[n]);};
+for(const a of ['link-down','port-disable','vlan-disable','log-only','none'])def('if-port',`loop-protection action ${a}`,c=>{const T=lpTargets(c);if(T)for(const p of T)p.lp.action=a;});
+def('if-port','no loop-protection action',c=>{const T=lpTargets(c);if(T)for(const p of T)p.lp.action='vlan-disable';});
+def('if-port','loop-protection timeout <LPTO:n>',c=>{const T=lpTargets(c);if(T)for(const p of T)p.lp.timeout=c.a.n;});
+def('if-port','no loop-protection timeout',c=>{const T=lpTargets(c);if(T)for(const p of T)p.lp.timeout=7;});
+function lpShow(c,names){const d=c.d,id=d.def.id,P=protect(),L=[`LDF Interval:      ${d.cfg.ldp.interval}`,'Fast Block:        Disabled',`Loop Detection:    ${d.cfg.ldp.on?'Enabled':'Disabled'}`,''];
+  if(!d.cfg.ldp.on){L.push('% Loop detection is off. Turn it on with "loop-protection loop-detect" in global configuration mode.');out(c.s,L.join('\n'));return;}
+  for(const n of names){if(isAggName(n))continue;const p=d.cfg.ports[n];if(p.agg)continue;const why=P.why[id+'|'+n];
+    const vl=P.down.has(id+'|'+n)?[]:[...P.vlan].filter(k=>k.startsWith(id+'|'+n+'|')).map(k=>+k.split('|')[2]);
+    L.push(`Interface:         ${n}`,`Action:            ${p.lp.action}`,`Vlan:              ${p.mode==='trunk'?'trunk':p.access}`,
+      `Status:            ${why?(why.whole?'Blocking (loop detected, '+p.lp.action+')':'Blocking VLAN '+fmtVlans(vl)+' (loop detected)'):'Normal'}`,`Timeout:           ${p.lp.timeout}`,'');}
+  out(c.s,L.join('\n').trimEnd());}
+def(U,'show loop-protection',c=>lpShow(c,portNames(c.d.def)));
+def(U,'show loop-protection interface <IFRANGE:ifs>',c=>{const n=ifPorts(c.a.ifs);if(!n){out(c.s,'% Loop protection applies to switch ports');return;}lpShow(c,n);});
+
+def(U,'show interface status',c=>{const d=c.d,id=d.def.id,L=['Port        Name               Status       Vlan   Duplex  Speed   Type'];
   for(const n of portNames(d.def)){const p=d.cfg.ports[n],e=effPort(d.cfg,n),x=linkAt(id,n),up=portRunning(id,n);
-    const st=!adminUp(id,n)?'disabled':up?'connected':(x&&!speedOk(x.link)?'err-speed':'notconnect');
+    const st=!p.admin||(p.agg&&d.cfg.aggs[p.agg]&&!d.cfg.aggs[p.agg].admin)?'disabled':!adminUp(id,n)?'err-disabled':up?'connected':(x&&!speedOk(x.link)?'err-speed':'notconnect');
     const vl=e.mode==='trunk'?'trunk':String(e.access);const dup=up?(p.duplex==='auto'?'a-full':p.duplex):p.duplex;const sp=up?(p.speed==='auto'?'a-'+linkSpeed(id,n):p.speed):p.speed;
-    L.push(n.padEnd(12)+(p.desc||'').slice(0,18).padEnd(19)+st.padEnd(12)+vl.padEnd(7)+dup.padEnd(8)+sp.padEnd(8)+(+n.split('.')[2]>d.def.nports-2&&d.def.nports===10?'SFP':'1000BaseTX'));}
+    L.push(n.padEnd(12)+(p.desc||'').slice(0,18).padEnd(19)+st.padEnd(13)+vl.padEnd(7)+dup.padEnd(8)+sp.padEnd(8)+(+n.split('.')[2]>d.def.nports-2&&d.def.nports===10?'SFP':'1000BaseTX'));}
   out(c.s,L.join('\n'));});
 
 /* ---- users, banner, lines ---- */
@@ -1263,7 +1372,7 @@ function completions(d,s,line){
 
 /* ================= Host shell (VPCS style) ================= */
 const HOSTHELP=['  dhcp                      Get an address by DHCP','  ip ADDR/LEN [GATEWAY]     Set IP address, e.g. ip 192.168.10.11/24 192.168.10.1','  ip ADDR MASK [GATEWAY]    Same, with a dotted mask','  clear ip                  Remove the IP configuration',
-  '  show ip                   Show IP settings','  ping ADDR                 Ping a host (5 packets)','  trace ADDR                Trace the path to a host','  clear                     Clear the screen'];
+  '  show ip                   Show IP settings','  mac [xxxx.xxxx.xxxx|reset] Show or change the MAC address (acts like a different device)','  ping ADDR                 Ping a host (5 packets)','  trace ADDR                Trace the path to a host','  clear                     Clear the screen'];
 async function hostCmd(id,v){
   invalidate();const s=S[id],d=D[id],c=d.cfg,w=v.trim().split(/\s+/).filter(Boolean);if(!w.length)return;const cmd=w[0].toLowerCase();
   if(cmd==='?'||cmd==='help'){out(s,HOSTHELP.join('\n'));return;}
@@ -1273,7 +1382,7 @@ async function hostCmd(id,v){
     if(r.fail==='noserver'){out(s,'DDD');out(s,"Can't find dhcp server");}else if(r.fail){out(s,'DD');out(s,`DHCP pool ${r.pool} has no free addresses`);}
     else out(s,`DORA IP ${r.ip}/${r.len}${r.gw?' GW '+r.gw:''}`);out(s,'');return;}
   if(cmd==='clear'&&w[1]==='ip'){c.ip=null;c.len=null;c.gw=null;c.dhcp=false;out(s,'IPv4 address/mask, gateway cleared');return;}
-  if(cmd==='show'){out(s,[`NAME        : ${id}[1]`,`IP/MASK     : ${c.ip?c.ip+'/'+c.len:'0.0.0.0/0'}`,`GATEWAY     : ${c.gw||'0.0.0.0'}`,`DNS         : ${c.dns||''}`,`DHCP        : ${c.dhcp?'yes':'no (static)'}`,`MAC         : ${d.def.mac.replace(/\./g,'').match(/../g).join(':')}`,'MTU         : 1500'].join('\n'));return;}
+  if(cmd==='show'){out(s,[`NAME        : ${id}[1]`,`IP/MASK     : ${c.ip?c.ip+'/'+c.len:'0.0.0.0/0'}`,`GATEWAY     : ${c.gw||'0.0.0.0'}`,`DNS         : ${c.dns||''}`,`DHCP        : ${c.dhcp?'yes':'no (static)'}`,`MAC         : ${macOf(id).replace(/\./g,'').match(/../g).join(':')}`,'MTU         : 1500'].join('\n'));return;}
   if(cmd==='ip'){let ip,len,gw;const a=w.slice(1);
     if(a[0]&&a[0].includes('/')){if(!isPrefix(a[0])){out(s,'Invalid address');return;}[ip,len]=a[0].split('/');len=+len;gw=a[1];}
     else if(a[0]&&isIp(a[0])){ip=a[0];if(a[1]&&/^\d{1,2}$/.test(a[1]))len=+a[1];else if(a[1]){len=maskToLen(a[1]);if(len===null){out(s,'Invalid netmask');return;}}else len=24;gw=a[2];}
@@ -1295,6 +1404,11 @@ async function hostCmd(id,v){
       out(s,back?` ${n}   ${last?'*':''}${h.ip}   ${rtt(n)} ms  ${rtt(n)} ms  ${rtt(n)} ms`:` ${n}   *  *  *`);render();}
     if(!f.ok){if(r.fail==='arp'&&!f.hops.length){out(s,`host (${r.gw||dst}) not reachable`);return;}for(let k=0;k<2;k++){n++;await sleep(600);out(s,` ${n}   *  *  *`);render();}}
     out(s,'');return;}
+  if(cmd==='mac'){if(!w[1]){out(s,`MAC         : ${macOf(id)}${c.mac?' (changed, factory '+d.def.mac+')':''}`);return;}
+    if(w[1].toLowerCase()==='reset'){delete c.mac;invalidate();out(s,`MAC address back to ${d.def.mac}`);return;}
+    const h=w[1].toLowerCase().replace(/[^0-9a-f]/g,'');if(h.length!==12||!/^[0-9a-f.:-]+$/i.test(w[1])||parseInt(h[1],16)&1){out(s,'Invalid MAC address. Use xxxx.xxxx.xxxx, for example 0050.7966.68aa');return;}
+    const m=h.match(/..../g).join('.');if(Object.keys(D).some(o=>o!==id&&macOf(o)===m)){out(s,'That MAC address is already used by another device');return;}
+    if(m===d.def.mac)delete c.mac;else c.mac=m;invalidate();out(s,`MAC address is now ${m}. To the switch this looks like a different device on the same cable.`);return;}
   out(s,`Bad command: "${v.trim()}". Use ? for help.`);
 }
 
@@ -1366,6 +1480,13 @@ access-list 3000 permit ip 192.168.20.0/24 192.168.20.0/24
 access-list 3000 deny ip 192.168.20.0/24 any
 interface port1.0.2
 access-group 3000
+exit
+interface port1.0.1-1.0.2
+switchport port-security
+switchport port-security violation shutdown
+loop-protection action link-down
+exit
+loop-protection loop-detect
 end
 write`,
   SW3:`configure terminal
@@ -1385,6 +1506,12 @@ interface vlan99
 ip address 192.168.99.3/24
 exit
 ip route 0.0.0.0/0 192.168.99.1
+interface port1.0.1-1.0.2
+switchport port-security
+switchport port-security violation shutdown
+loop-protection action link-down
+exit
+loop-protection loop-detect
 end
 write`};
 const ipOf=h=>D[h].cfg.ip||'0.0.0.0';
@@ -1408,22 +1535,24 @@ const SCENARIOS={
   mgmt:{name:'Ticket 1043: ACCESS2 unmanageable',scripts:SOLUTION,fault:{SW3:cmds('no ip route 0.0.0.0/0 192.168.99.1','ip route 0.0.0.0/0 192.168.99.254'),SW1:cmds('interface vlan99','description Management')},
     brief:'The NOC can reach ACCESS1 but pings to ACCESS2 (192.168.99.3) from NVR1 fail. Local users on ACCESS2 are fine. Find out why the switch cannot answer.'},
   storm:{name:'Ticket 1044: Site-wide outage',scripts:SOLUTION,fault:{
-      SW3:cmds('no spanning-tree enable','interface port1.0.8','switchport mode trunk','switchport trunk allowed vlan add 10,20,99'),
-      SW2:cmds('interface port1.0.8','switchport mode trunk','switchport trunk allowed vlan add 10,20,99')},
-    brief:'A contractor added a trunk between ACCESS1 and ACCESS2 on port1.0.8 "for resilience". Minutes later every device on site went offline and the switches raised CPU alarms. Restore service and keep the new link as a backup path.'},
+      SW3:cmds('no loop-protection loop-detect','no spanning-tree enable','interface port1.0.8','switchport mode trunk','switchport trunk allowed vlan add 10,20,99'),
+      SW2:cmds('no loop-protection loop-detect','interface port1.0.8','switchport mode trunk','switchport trunk allowed vlan add 10,20,99')},
+    brief:'A contractor added a trunk between ACCESS1 and ACCESS2 on port1.0.8 "for resilience". He also turned off loop protection because it "kept blocking the new link". Minutes later every device on site went offline and the switches raised CPU alarms. Restore service and keep the new link as a backup path.'},
   dhcp:{name:'Ticket 1046: New camera has no address',scripts:SOLUTION,hosts:{CAM1:{ip:null,len:null,gw:null,dhcp:true}},
     fault:{SW1:cmds('ip dhcp pool CCTV','network 192.168.21.0/24','default-router 192.168.20.254')},
     brief:'CAM1 was swapped for a new camera set to DHCP. It never gets an address, and the installer says the CCTV pool on CORE was "tidied up" last week. Run dhcp on CAM1 to test. There is more than one mistake.'},
   lacp:{name:'Ticket 1045: ACCESS1 cut off',scripts:SOLUTION,fault:{
       SW1:cmds('interface port1.0.1,port1.0.3','channel-group 1 mode passive'),SW2:cmds('interface port1.0.9-1.0.10','channel-group 1 mode passive')},
     brief:'After a change window, every user and camera on ACCESS1 is cut off from the rest of the site. Both uplink cables test fine and their link lights are on.'},
+  hotdesk:{name:'Ticket 1047: Hot desk PC offline',scripts:SOLUTION,hosts:{PC1:{mac:'0050.7966.68a1',ip:null,len:null,gw:null,dhcp:true}},
+    brief:'PC1 was swapped for a new laptop this morning. The laptop is set to DHCP but never gets an address, and the user says the network point is dead. The cable and the laptop both test fine. Get the laptop online (run dhcp on PC1 to test) without turning off the port\'s security.'},
 };
 const tgt=t=>t.toHost?ipOf(t.toHost):t.to;
 const testOk=t=>t.blocked?pingCalc(t.from,tgt(t)).fail==='acl':reach(t.from,tgt(t));
 let currentScen='factory';
 function loadScenario(key){
   const sc=SCENARIOS[key];currentScen=key;
-  for(const id in D){D[id].cfg=factoryCfg(D[id].def);D[id].startup=null;D[id].boot=Date.now();D[id].leases={};D[id].files={};D[id].clockOff=0;}
+  for(const id in D){D[id].cfg=factoryCfg(D[id].def);D[id].startup=null;D[id].boot=Date.now();D[id].leases={};D[id].files={};D[id].clockOff=0;D[id].psec={};}
   LAST=null;
   invalidate();
   for(const id in sc.scripts)runScript(id,sc.scripts[id]);
@@ -1473,6 +1602,12 @@ const EXERCISES=[
    sol:'configure terminal\nip dhcp pool DATA\nnetwork 192.168.10.0/24\nrange 192.168.10.100 192.168.10.199\ndefault-router 192.168.10.1\nexit\nservice dhcp-server\n\n(on PC1)\ndhcp',
    check:()=>{const c=D.SW1.cfg.dhcp;if(!c.service)return false;const P=Object.values(c.pools);const ok=(n,g)=>P.some(x=>x.net===n&&x.len===24&&x.range&&x.gw===g);
      const h=D.PC1.cfg;return ok('192.168.10.0','192.168.10.1')&&ok('192.168.20.0','192.168.20.1')&&h.dhcp&&!!h.ip&&ipInt(h.ip)>=ipInt('192.168.10.100')&&ipInt(h.ip)<=ipInt('192.168.10.199')&&reach('PC1',ipOf('PC2'));}},
+  {t:'Lock the host ports with port security',d:'On ACCESS1 and ACCESS2 turn on port security on the host ports (<b>port1.0.1-1.0.2</b>): learn at most <b>1</b> MAC address and <b>shut the port down</b> on a violation. Then test it: on PC1 type <code>mac 0050.7966.68aa</code> to play an unknown laptop and watch port1.0.1 on ACCESS1 go <b>err-disabled</b>. Put PC1 back with <code>mac reset</code> and bring the port back with <code>no shutdown</code>.',
+   sol:'interface port1.0.1-1.0.2\nswitchport port-security\nswitchport port-security maximum 1\nswitchport port-security violation shutdown\ndo show port-security interface port1.0.1\n\n(on PC1)  mac 0050.7966.68aa\n(ACCESS1) show interface status\n(on PC1)  mac reset\n(ACCESS1) interface port1.0.1\n          no shutdown',
+   check:()=>['SW2','SW3'].every(id=>['port1.0.1','port1.0.2'].every(n=>{const p=pt(id,n),st=(D[id].psec||{})[n];return p.ps.on&&p.ps.max===1&&p.ps.viol==='shutdown'&&!(st&&st.down);}))&&reach('PC1',ipOf('PC2'))&&reach('CAM1',ipOf('NVR1'))},
+  {t:'Stop loops at the edge with loop protection',d:'Spanning tree cannot stop a loop it never sees, such as a cheap desk switch patched back into the wall. On ACCESS1 and ACCESS2 turn on <b>loop detection</b> and set the host ports (<b>port1.0.1-1.0.2</b>) to <b>take the link down</b> if they see a loop. Check with <code>show loop-protection</code>. To watch it work, load Ticket 1044 afterwards and turn loop detection back on on ACCESS2.',
+   sol:'configure terminal\nloop-protection loop-detect\ninterface port1.0.1-1.0.2\nloop-protection action link-down\ndo show loop-protection interface port1.0.1-1.0.2',
+   check:()=>['SW2','SW3'].every(id=>D[id].cfg.ldp.on&&['port1.0.1','port1.0.2'].every(n=>pt(id,n).lp.action==='link-down'))},
   {t:'Save and prove it',d:'Save every switch so the startup config matches the running config. Try <code>reload</code> on one switch and confirm it comes back working.',
    sol:'write\nshow startup-config\nreload',check:()=>sw.every(id=>saved(D[id]))},
 ];
@@ -1484,7 +1619,8 @@ const THEORY=[
    intro:'AlliedWare Plus has three main command modes. You log in to <b>user exec</b> (prompt <code>awplus&gt;</code>), which can only look. <code>enable</code> takes you to <b>privileged exec</b> (<code>awplus#</code>), which can run every show, save and reload. <code>configure terminal</code> enters <b>global configuration</b> (<code>awplus(config)#</code>), where changes are made. Each mode is a safety step: you have to mean it to change anything.',
    points:['Every factory switch is called <code>awplus</code>. With three identical prompts it is easy to type into the wrong console. A hostname puts the switch\'s role in front of you on every line.',
      'The hostname also appears in LLDP, the log, SNMP and backup files, so neighbours and monitoring tools can tell the switches apart.',
-     'Names that describe the role (CORE, ACCESS1) age better than names that describe the box or the room.'],
+     'Names that describe the role (CORE, ACCESS1) age better than names that describe the box or the room.',
+     'Long output stops at <code>--More--</code>, just like a real console: <kbd>Space</kbd> shows the next page, <kbd>Enter</kbd> one more line and <kbd>q</kbd> stops. <code>terminal length 0</code> turns paging off until you log out.'],
    cmds:[['manager / friend','The factory login. In a real network you change this password straight away.'],['enable','Moves to privileged exec, needed before you can configure or save.'],
      ['configure terminal','Enters global configuration mode, where settings that affect the whole switch live.'],['hostname CORE','Renames the switch. The prompt changes immediately, which is a quick proof you are on the right device.']]},
   {t:'Create the VLANs',
@@ -1578,6 +1714,28 @@ const THEORY=[
    cmds:[['ip dhcp pool DATA','Creates the pool for the Data VLAN and enters pool configuration.'],['network 192.168.10.0/24','Ties the pool to the subnet and sets the mask clients receive.'],
      ['range 192.168.10.100 192.168.10.199','The addresses that can be leased.'],['default-router 192.168.10.1','The gateway handed to clients, CORE\'s VLAN 10 address.'],
      ['service dhcp-server','Starts the DHCP server.'],['dhcp (on PC1)','Makes the PC ask for an address, so you can test the pool.']]},
+  {t:'Lock the host ports with port security',
+   intro:'Anyone who can reach a network point can plug in: a personal laptop, a home router, a cheap switch, or an attacker\'s device. <b>Port security</b> makes the switch remember the MAC addresses it sees on a port and refuse any more than you allow. With <b>maximum 1</b>, the first device to talk owns the port.',
+   points:['Learned addresses stay until they are cleared or the switch reloads. Unplugging the PC does not free the port, which is the point: a visitor cannot just swap cables.',
+     'The <b>violation</b> action decides what happens to an extra MAC. <b>protect</b> (the default) silently drops its frames, <b>restrict</b> drops them and counts the violation, <b>shutdown</b> disables the port until someone runs <code>no shutdown</code>. Shutdown is the loudest: the user calls the helpdesk and you find out.',
+     'A port shut down by a violation shows as <b>err-disabled</b> in <code>show interface status</code>, and the log records the intruding MAC. <code>show port-security interface</code> shows what was learned and the last violation.',
+     'When a device is replaced on purpose, clear the old address first with <code>clear mac address-table dynamic interface port1.0.1</code>, then <code>no shutdown</code>. Otherwise the port shuts again as soon as the new device talks.',
+     'Phones with a PC behind them need <b>maximum 2</b> or more. Uplinks to other switches must never have port security, which is why it only works on access ports.',
+     'MAC addresses can be copied, so port security keeps honest mistakes and casual visitors out, not a determined attacker. 802.1X authentication is the stronger tool.'],
+   cmds:[['interface port1.0.1-1.0.2','Selects both host ports.'],['switchport port-security','Turns port security on. The default maximum is 1 and the default action is protect.'],
+     ['switchport port-security maximum 1','Allows one MAC address on the port.'],['switchport port-security violation shutdown','Disables the port if a second device appears.'],
+     ['do show port-security interface port1.0.1','Shows the learned address, lock status and violation count.'],['mac 0050.7966.68aa (on PC1)','Lab only: changes PC1\'s MAC, which looks to the switch exactly like a different device on the same cable.'],
+     ['no shutdown','Brings an err-disabled port back once the cause is fixed.']]},
+  {t:'Stop loops at the edge with loop protection',
+   intro:'<b>Loop protection</b> is an Allied Telesis feature that catches loops spanning tree misses. With <b>loop detection</b> on, the switch regularly sends a small <b>loop detection frame (LDF)</b> out of every port. If a port ever receives one of its own frames back, the frame must have gone round a loop, so that port takes action.',
+   points:['Spanning tree only sees loops between devices that speak spanning tree. A cheap unmanaged switch under a desk with two cables into the wall, or a patch lead between two floor points, loops traffic without any BPDUs. Loop detection finds it anyway, because it looks for its own frames.',
+     'It is also a safety net when spanning tree is turned off or misconfigured, as in Ticket 1044. It is not a replacement for spanning tree: spanning tree keeps the backup link ready, loop protection just blocks.',
+     'The <b>action</b> is set per port. <b>vlan-disable</b> (the default) blocks only the looping VLAN, <b>port-disable</b> blocks the whole port, <b>link-down</b> takes the link down so the user sees it, <b>log-only</b> just records it.',
+     'For host ports, <b>link-down</b> is a good choice: a desk loop is cut off completely and nothing else on the switch notices. After the timeout (7 seconds by default) the port tries again, and stays blocked while the loop is still there.',
+     'Every detection is logged, so <code>show log</code> tells you which port and VLAN looped.'],
+   cmds:[['loop-protection loop-detect','(config) Starts sending loop detection frames on every port, with the default action vlan-disable.'],
+     ['interface port1.0.1-1.0.2','Selects the host ports.'],['loop-protection action link-down','Takes the link down if a loop is found on these ports.'],
+     ['do show loop-protection interface port1.0.1-1.0.2','Shows each port\'s action, timeout and whether it is blocking.']]},
   {t:'Save and prove it',
    intro:'Every command you type changes the <b>running configuration</b>, which lives in memory. At boot the switch loads the <b>startup configuration</b> from flash. Until you save, a power cut or reload takes the switch back to what it was before you started.',
    points:['Saving is a deliberate step, and that is a feature: if a change locks you out, a reload gets you back to the last good config.',
@@ -1676,7 +1834,7 @@ function scQuizCheck(){if(!SCQ)return;const n=$('#scQn').value.trim().replace(/\
 
 /* ================= Persistence ================= */
 const KEY='awplus-testlab-v1',SBKEY='awplus-testlab-sandbox-v1',MODEKEY='awplus-testlab-mode';
-function snapshot(){const o={v:1,scenario:currentScen,devices:{}};for(const id in D)o.devices[id]={cfg:D[id].cfg,startup:D[id].startup,leases:D[id].leases,files:D[id].files,clockOff:D[id].clockOff||0};
+function snapshot(){const o={v:1,scenario:currentScen,devices:{}};for(const id in D)o.devices[id]={cfg:D[id].cfg,startup:D[id].startup,leases:D[id].leases,files:D[id].files,clockOff:D[id].clockOff||0,psec:D[id].psec||{}};
   if(mode==='sandbox'){o.mode='sandbox';o.scenario='sandbox';o.defs=clone(DEFS);o.links=clone(LINKS);}return o;}
 function checkSandbox(o){if(!Array.isArray(o.defs)||!Array.isArray(o.links))throw new Error('Sandbox export is missing its equipment list');const ids=new Set();
   for(const d of o.defs){if(!d||typeof d.id!=='string'||!/^[A-Za-z0-9]{1,12}$/.test(d.id)||ids.has(d.id))throw new Error('Bad device id in sandbox export');ids.add(d.id);
@@ -1690,7 +1848,7 @@ function applySnapshot(o){if(!o||o.v!==1||!o.devices)throw new Error('Not an AW+
   if(sb)checkSandbox(o);else for(const def of STD_DEFS){const x=o.devices[def.id];if(!x||!x.cfg)throw new Error('Missing device '+def.id);}
   if(sb){for(const d of o.defs){const x=o.devices[d.id];if(!x||!x.cfg)throw new Error('Missing device '+d.id);}setWorld(o.defs,o.links);mode='sandbox';}
   else if(mode!=='lab'||DEFS.length!==STD_DEFS.length){setWorld(STD_DEFS,STD_LINKS);mode='lab';}
-  for(const id in D){D[id].cfg=normalizeCfg(D[id].def,clone(o.devices[id].cfg));D[id].startup=o.devices[id].startup?normalizeCfg(D[id].def,clone(o.devices[id].startup)):null;D[id].boot=Date.now();D[id].leases=o.devices[id].leases||{};D[id].files=o.devices[id].files||{};D[id].clockOff=o.devices[id].clockOff||0;S[id]=newSession(id);if(D[id].def.kind==='switch')seedLog(D[id]);}LAST=null;
+  for(const id in D){D[id].cfg=normalizeCfg(D[id].def,clone(o.devices[id].cfg));D[id].startup=o.devices[id].startup?normalizeCfg(D[id].def,clone(o.devices[id].startup)):null;D[id].boot=Date.now();D[id].leases=o.devices[id].leases||{};D[id].files=o.devices[id].files||{};D[id].clockOff=o.devices[id].clockOff||0;D[id].psec=o.devices[id].psec||{};S[id]=newSession(id);if(D[id].def.kind==='switch')seedLog(D[id]);}LAST=null;
   currentScen=sb?'sandbox':SCENARIOS[o.scenario]?o.scenario:'factory';invalidate();}
 function save(){try{localStorage.setItem(mode==='sandbox'?SBKEY:KEY,JSON.stringify(snapshot()));localStorage.setItem(MODEKEY,mode);}catch(e){}}
 function restoreKey(k){try{const t=localStorage.getItem(k);if(t){applySnapshot(JSON.parse(t));return true;}}catch(e){}return false;}
@@ -1764,7 +1922,8 @@ const REF=[
   ['Exec / privileged',[['enable / disable','Enter or leave privileged mode'],['configure terminal','Global configuration'],['show running-config [interface IF]','Current configuration'],['show startup-config','Saved configuration'],
     ['show vlan brief | VLANID','VLAN table and members'],['show interface brief | IF | switchport','Port and VLAN status'],['show ip interface brief','L3 interfaces'],['show ip route','Routing table'],
     ['show lldp neighbors','Directly connected switches'],['show mac address-table','Learned MACs'],['show version | system | clock','Platform info'],['ping / traceroute A.B.C.D','Reachability'],
-    ['write | copy running-config startup-config','Save'],['erase startup-config / reload','Back to factory']]],
+    ['write | copy running-config startup-config','Save'],['write terminal','Same as show running-config'],['erase startup-config / reload','Back to factory'],
+    ['terminal length 0 / terminal no length','Turn --More-- paging off / back on (Space page, Enter line, q quit)']]],
   ['Global config',[['hostname NAME','Set the prompt'],['vlan database','VLAN database mode'],['interface port1.0.1-1.0.4 | vlan10','Select interfaces'],['ip route A.B.C.D/M NEXTHOP','Static route'],['lldp run','Enable LLDP'],['do COMMAND','Run an exec command']]],
   ['VLAN database',[['vlan 10 name Data','Create and name'],['vlan 10,20,30-35','Create several'],['vlan 30 state disable','Suspend a VLAN'],['no vlan 30','Delete']]],
   ['Port interface',[['switchport mode access | trunk','Port mode'],['switchport access vlan 10','Access VLAN'],['switchport trunk allowed vlan add|remove LIST','Tagged VLANs'],['switchport trunk allowed vlan all|none|except LIST',''],
@@ -1787,8 +1946,13 @@ const REF=[
     ['access-group 3000','(port) Filter traffic entering the port'],['show access-list','Entries and where they are applied']]],
   ['DHCP server',[['ip dhcp pool NAME','(config) Create a pool'],['network 192.168.10.0/24','(pool) Subnet served'],['range A.B.C.D A.B.C.D','(pool) Addresses to lease'],['default-router / dns-server A.B.C.D','(pool) Options'],
     ['service dhcp-server','(config) Start the server'],['show ip dhcp pool | binding','Pools and leases'],['clear ip dhcp binding all','Drop all leases']]],
+  ['Port security',[['switchport port-security','(port) Learn and lock MAC addresses on an access port'],['switchport port-security maximum N','(port) How many MACs may be learned (default 1)'],
+    ['switchport port-security violation protect|restrict|shutdown','(port) Action for an extra MAC'],['show port-security interface IF','Learned MACs, lock state, violations'],['show port-security intrusion','Violation counts and last intruder'],
+    ['clear mac address-table dynamic interface IF','Forget learned MACs (after replacing a device)'],['no shutdown','(port) Recover an err-disabled port']]],
+  ['Loop protection',[['loop-protection loop-detect [ldf-interval N]','(config) Send loop detection frames'],['loop-protection action link-down|port-disable|vlan-disable|log-only|none','(port) What to do when a loop is seen'],
+    ['loop-protection timeout N','(port) Seconds before the port tries again'],['show loop-protection [interface IF]','Action and status per port']]],
   ['VLAN interface',[['ip address 192.168.10.1/24','Address (prefix notation)'],['no ip address',''],['shutdown / no shutdown','']]],
-  ['Host shell (PCs, CAM1, NVR1)',[['ip 192.168.10.11/24 192.168.10.1','Address and gateway'],['show','Current settings'],['dhcp','Get an address from a DHCP server'],['ping / trace A.B.C.D','Test'],['clear ip','Remove address']]],
+  ['Host shell (PCs, CAM1, NVR1)',[['ip 192.168.10.11/24 192.168.10.1','Address and gateway'],['show','Current settings'],['dhcp','Get an address from a DHCP server'],['ping / trace A.B.C.D','Test'],['clear ip','Remove address'],['mac xxxx.xxxx.xxxx | mac reset','Pretend to be a different device (port security tests)']]],
 ];
 /* ---- sandbox panel ---- */
 function sbMsg(t,err){const m=$('#sbMsg');m.textContent=t||'';m.classList.toggle('err',!!err);}
@@ -1834,8 +1998,10 @@ function trackEvents(){const cur={};
     for(const pn of portNames(d.def))cur[id+' '+pn]=portRunning(id,pn)?'up':'down';
     if(stpOn(id))for(const lp of logicalPorts(d)){const r=lpRole(id,lp);if(r.role!=='disabled')cur[id+' stp '+lp]=r.role;}
     for(const v in d.cfg.vifs)cur[id+' vlan'+v]=vifUp(id,+v)?'up':'down';}
+  const P=protect();for(const k of P.down){const [id,pn]=k.split('|');cur[id+' ldp '+pn]=P.why[k].action;}for(const k of P.vlan){const [id,pn,v]=k.split('|');cur[id+' ldp '+pn+':'+v]='vlan-disable';}
   if(LAST)for(const k in cur){if(LAST[k]===cur[k]||(LAST[k]===undefined&&k.includes(' stp ')))continue;const [id,a,b]=k.split(' '),d=D[id];
-    if(a==='stp')logEv(d,'user.notice',`RSTP[1101]: ${b}: port role changed to ${roleName(cur[k])}`);else logEv(d,'user.notice',`IMI[1036]: Interface ${a} changed state to ${cur[k]}`);}
+    if(a==='ldp'){const [pn,v]=b.split(':');logEv(d,'user.warning',`LOOP_PROTECTION[1190]: Loop detected on ${pn}${v?' vlan '+v:''}, action ${cur[k]}`);}
+    else if(a==='stp')logEv(d,'user.notice',`RSTP[1101]: ${b}: port role changed to ${roleName(cur[k])}`);else logEv(d,'user.notice',`IMI[1036]: Interface ${a} changed state to ${cur[k]}`);}
   LAST=cur;}
 function refresh(){invalidate();trackEvents();render();renderTabs();renderTopo();renderChecks();}
 function selectDev(id){active=id;refresh();$('#cmd').focus();}
@@ -1855,6 +2021,11 @@ function handleLine(d,s,v){
   if(CFGMODES.includes(s.mode)&&v.trim())logEv(d,'user.notice',`IMISH[1490]: [${s.user||'manager'}@${tty}]${v.trim()}`);
   return execLine(d,s,v);
 }
+// Long output stops at --More--, as on a real console. terminal length N (0 = never) changes the page size for the session.
+const TERMLEN=24;
+const pageLen=s=>s.termLen===undefined?TERMLEN:s.termLen;
+function pageOut(s,buf,n0){const len=pageLen(s);if(!len||buf.length-n0<=len-1)return;s.more=buf.splice(n0+len-1);}
+function moreKey(con,s,act){if(act==='quit'){s.more=null;return;}const n=act==='line'?1:pageLen(s)-1;con.buf.push(...s.more.splice(0,n));if(!s.more.length)s.more=null;}
 function checkRemote(s){if(s.remote&&s.remote.sess.closed){out(s,`Connection to ${s.remote.ip} closed.`);s.remote=null;}}
 function submit(){
   if(!S[active])return;
@@ -1862,9 +2033,9 @@ function submit(){
   if(s.busy)return;
   const {d:ed,s:es}=effOf(active);
   const p=promptOf(active);s.buf.push((es.login==='pass'&&!es.pending)?p:p+v);
-  const id=active;let res;
+  const id=active;let res;const n0=s.buf.length;
   if(ed.def.kind==='host'){if(v.trim()){s.hist.push(v);}s.hIdx=s.hist.length;res=hostCmd(id,v);}
-  else res=handleLine(ed,es,v);
+  else{res=handleLine(ed,es,v);if(!(res&&res.then))pageOut(es,s.buf,n0);}
   checkRemote(s);
   if(res&&typeof res.then==='function'){s.busy=true;render();res.finally(()=>{s.busy=false;checkRemote(s);afterCommand();if(id===active)$('#cmd').focus();});}
   afterCommand();
@@ -1927,6 +2098,10 @@ function boot(){
   inp.addEventListener('keydown',e=>{
     const s0=S[active];if(!s0||s0.busy){e.preventDefault();return;}
     const {d:ed,s}=effOf(active);
+    if(s.more){if(e.ctrlKey&&(e.key==='c'||e.key==='C')&&window.getSelection().toString())return;
+      let act=null;if(e.key===' ')act='page';else if(e.key==='Enter'){const v=inp.value.trim().toLowerCase();inp.value='';act=v==='q'?'quit':v?'page':'line';}
+      else if(e.key==='q'||e.key==='Q'||e.key==='Escape'||(e.ctrlKey&&(e.key==='c'||e.key==='C'||e.key==='z'||e.key==='Z')))act='quit';
+      if(e.key.length===1||act||e.key==='Tab')e.preventDefault();if(act){moreKey(s0,s,act);render();}return;}
     const isSw=ed.def.kind==='switch'&&s.login==='ok'&&!s.pending;
     if(e.key==='Enter'){e.preventDefault();submit();}
     else if(e.key==='?'&&isSw){e.preventDefault();s0.buf.push(promptOf(active)+inp.value+'?');s0.buf.push(...helpList(ed,s,inp.value));render();}

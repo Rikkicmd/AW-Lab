@@ -14,7 +14,7 @@ Created by Rikki Keene. © 2026 Rikki Keene.
 
 - **Hands-on from minute one.** Log in as `manager` / `friend` and start typing. Modes, abbreviations, `?` help, Tab completion and `^` error markers behave the way you'd expect on a real switch.
 - **See the network react.** The topology diagram redraws link states as you work (forwarding, blocked by spanning tree, LACP not bundled, down), and six reachability checks update after every command.
-- **Guided, then on your own.** 13 exercises build a full VLAN design step by step; six fault tickets drop you into a broken network to troubleshoot.
+- **Guided, then on your own.** 15 exercises build a full VLAN design step by step; seven fault tickets drop you into a broken network to troubleshoot.
 - **Safe to break.** Cause a broadcast storm, lock yourself out with an ACL, erase the config, then reset or restore from a backup.
 - **Pick a look.** The Theme menu in the header switches between Dark, Light, High contrast, Classic terminal and Ocean, and remembers your choice.
 
@@ -50,6 +50,7 @@ Switch login: `manager` / `friend`
 ## What it simulates
 
 - AW+ style CLI with modes (`>`, `#`, `(config)#`, `(config-if)#`, `(config-vlan)#`), abbreviated commands, `?` help, Tab completion, history, `do`, and `^` error markers
+- `--More--` paging on long output (Space for a page, Enter for a line, q to stop), `terminal length 0` / `terminal no length`, `write terminal`, and the usual `no` forms (`no interface vlanN`, `no access-list N <entry>`, `no speed`, `no duplex`, `no spanning-tree portfast`, `no network`, `no lease`)
 - VLAN database, access ports, trunks (allowed / native VLANs), port and VLAN interface shutdown and descriptions
 - VLAN interfaces with IP addressing, inter-VLAN routing, static routes
 - `show running-config`, `startup-config`, `vlan brief`, `interface brief|switchport|IF`, `ip interface brief`, `ip route`, `lldp neighbors`, `mac address-table`, `version`, `system`, `clock`
@@ -58,6 +59,8 @@ Switch login: `manager` / `friend`
 - Link aggregation: LACP (`channel-group N mode active|passive`, `poN`) and static (`static-channel-group N`, `saN`), `show etherchannel [summary]`, `show static-channel-group`
 - Loop detection: if spanning tree is disabled or misconfigured, redundant links cause a broadcast storm and traffic in the affected VLANs fails
 - Hardware IP ACLs: `access-list 3000-3699 permit|deny ip|icmp SRC DST` (`A.B.C.D/M`, `host A.B.C.D`, `any`), applied inbound with `access-group`, unmatched traffic permitted; `show access-list`
+- Port security: `switchport port-security`, `maximum`, `violation protect|restrict|shutdown`; learned MACs stick until cleared, a shut-down port shows `err-disabled` and recovers with `no shutdown`; `show port-security interface|intrusion`, `clear mac address-table dynamic interface`. Hosts can change MAC (`mac xxxx.xxxx.xxxx`) to play a different device
+- Loop protection: `loop-protection loop-detect [ldf-interval N]`, per-port `loop-protection action link-down|port-disable|vlan-disable|log-only|none` and `timeout`; detected loops are blocked and logged; `show loop-protection`
 - DHCP server: `ip dhcp pool` with `network`, `range`, `default-router`, `dns-server`, `lease`; `service dhcp-server`; `show ip dhcp pool|binding`; `clear ip dhcp binding all`
 - Everyday sandbox commands:
   - Output filters on any command: `| include`, `| exclude`, `| begin`
@@ -67,13 +70,13 @@ Switch login: `manager` / `friend`
   - Local users with privilege levels, `banner motd`, `service ssh|telnet`, `clock set`, `clock timezone`, NTP client and master, SNMP agent, communities, location and contact, DNS name servers, line exec-timeout
   - Port `speed` and `duplex`; mismatched fixed speeds bring the link down
 - `ping` (with `repeat N`) and `traceroute` computed from the real L2/L3 state of the lab
-- End devices with a simple host shell (`ip`, `dhcp`, `show`, `ping`, `trace`)
+- End devices with a simple host shell (`ip`, `dhcp`, `show`, `ping`, `trace`, `mac`)
 
 ## Coursework
 
-- **Exercises:** 13 guided tasks that build a Data (VLAN 10), CCTV (VLAN 20) and Management (VLAN 99) design, then make CORE the root bridge, bundle the ACCESS1 uplinks with LACP, set edge ports, lock the cameras down with an ACL and hand out addresses by DHCP. Each is checked live.
-- **Theory:** a short explainer for each exercise covering the concept (VLANs, 802.1Q trunks, inter-VLAN routing, RSTP, LACP, edge ports, ACLs, DHCP, saving) and why each command is used. Every exercise has a *Why? Read the theory* link that opens its entry.
-- **Fault tickets:** pre-broken labs to troubleshoot (CCTV outage, PC offline, unmanageable switch, site-wide broadcast storm, LACP bundle down, camera with no DHCP address), plus a completed reference lab.
+- **Exercises:** 15 guided tasks that build a Data (VLAN 10), CCTV (VLAN 20) and Management (VLAN 99) design, then make CORE the root bridge, bundle the ACCESS1 uplinks with LACP, set edge ports, lock the cameras down with an ACL, hand out addresses by DHCP, lock the host ports with port security and guard them with loop protection. Each is checked live.
+- **Theory:** a short explainer for each exercise covering the concept (VLANs, 802.1Q trunks, inter-VLAN routing, RSTP, LACP, edge ports, ACLs, DHCP, port security, loop protection, saving) and why each command is used. Every exercise has a *Why? Read the theory* link that opens its entry.
+- **Fault tickets:** pre-broken labs to troubleshoot (CCTV outage, PC offline, unmanageable switch, site-wide broadcast storm, LACP bundle down, camera with no DHCP address, hot desk laptop blocked by port security), plus a completed reference lab.
 - **Live connectivity:** six reachability checks update after every command.
 - **Subnets:** an IPv4 subnet calculator. Type an address with a prefix or mask to get the network, broadcast, host range, host count, mask, wildcard and a binary view. It lists which lab devices sit in that subnet, gives ready-made AW+ lines (`ip address`, DHCP `network`/`range`, `access-list`) you can click into the console, checks whether two addresses share a subnet, splits a subnet into smaller ones, and has a practice mode. Available in lessons and the sandbox.
 
