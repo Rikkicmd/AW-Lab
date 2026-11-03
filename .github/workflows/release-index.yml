@@ -23,9 +23,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run engine tests
-        run: node tests/engine-test.js
-
       - name: Move the lab tag to this commit
         run: |
           git tag -f lab

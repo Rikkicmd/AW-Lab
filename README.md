@@ -107,7 +107,7 @@ The whole lab is one file. Grab it any of these ways, then double-click it to op
 - From the command line: `curl -LO https://github.com/Rikkicmd/AW-Lab/releases/latest/download/index.html`
 - Or clone the repo: `git clone https://github.com/Rikkicmd/AW-Lab.git`
 
-A GitHub Action refreshes that download every time `index.html` changes on `main`, after the engine tests pass. Everything (styles, engine, scenarios) is inline, so it also works offline from a USB stick or a shared drive.
+A GitHub Action refreshes that download every time `index.html` changes on `main`. Everything (styles, engine, scenarios) is inline, so it also works offline from a USB stick or a shared drive.
 
 ## Tests
 
