@@ -2,7 +2,7 @@
 
 **Practise AlliedWare Plus style switch configuration in your browser.** Three switches, four end devices, real CLI behaviour and live connectivity checks, plus a sandbox where you add and cable your own equipment, all in one self-contained `index.html`. No install, no server, no switch images.
 
-**[▶ Open the live lab](https://claude.ai/artifact/6iULQJ7CAKa4VqzqzrBqWJ)** &nbsp;·&nbsp; or download `index.html` and open it in any modern browser.
+**[▶ Open the live lab](https://claude.ai/artifact/6iULQJ7CAKa4VqzqzrBqWJ)** &nbsp;·&nbsp; **[⬇ Download index.html](https://github.com/Rikkicmd/AW-Lab/releases/latest/download/index.html)** and open it in any modern browser.
 
 ![AW+ Test Lab: topology, live connectivity checks and the CORE switch console](docs/screenshots/overview.png)
 
@@ -98,9 +98,16 @@ Progress is kept in the browser's local storage. Use **Export lab** / **Import l
 
 MSTP, per-VLAN spanning tree, DHCP relay, OSPF, AMF, TCP/UDP port matching in ACLs, timers (spanning tree converges instantly).
 
-## Run it locally
+## Download and run it locally
 
-Download or clone the repo and open `index.html` in Chrome, Edge, Firefox or Safari. Everything (styles, engine, scenarios) is inline, so it also works offline from a USB stick or a shared drive.
+The whole lab is one file. Grab it any of these ways, then double-click it to open it in Chrome, Edge, Firefox or Safari:
+
+- **[Download index.html](https://github.com/Rikkicmd/AW-Lab/releases/latest/download/index.html)** (one click, always the latest version from `main`)
+- From the [Releases page](https://github.com/Rikkicmd/AW-Lab/releases/latest), under *Assets*
+- From the command line: `curl -LO https://github.com/Rikkicmd/AW-Lab/releases/latest/download/index.html`
+- Or clone the repo: `git clone https://github.com/Rikkicmd/AW-Lab.git`
+
+A GitHub Action refreshes that download every time `index.html` changes on `main`, after the engine tests pass. Everything (styles, engine, scenarios) is inline, so it also works offline from a USB stick or a shared drive.
 
 ## Tests
 

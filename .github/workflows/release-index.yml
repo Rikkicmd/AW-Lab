@@ -1,0 +1,48 @@
+name: Publish index.html download
+
+# Keeps a "lab" release whose only asset is the current index.html, so
+# https://github.com/Rikkicmd/AW-Lab/releases/latest/download/index.html
+# always downloads the newest lab from main.
+
+on:
+  push:
+    branches: [main]
+    paths: [index.html, .github/workflows/release-index.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-index
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run engine tests
+        run: node tests/engine-test.js
+
+      - name: Move the lab tag to this commit
+        run: |
+          git tag -f lab
+          git push -f origin refs/tags/lab
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NOTES="Latest AW+ Test Lab, built from ${GITHUB_SHA::7} on $(date -u +%Y-%m-%d).
+
+          Download **index.html** below and open it in Chrome, Edge, Firefox or Safari. It works offline, no install needed.
+
+          Independent training simulator. Not affiliated with or endorsed by Allied Telesis. © 2026 Rikki Keene."
+          if gh release view lab >/dev/null 2>&1; then
+            gh release edit lab --title "AW+ Test Lab (latest)" --notes "$NOTES" --latest
+          else
+            gh release create lab --title "AW+ Test Lab (latest)" --notes "$NOTES" --latest
+          fi
+          gh release upload lab index.html --clobber
