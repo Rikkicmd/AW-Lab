@@ -1,7 +1,7 @@
 // Regenerates the README screenshots in docs/screenshots/.
 // Usage: npm install playwright && node tests/screenshots.js
 const path=require('path');const {chromium}=require('playwright');
-const out=path.resolve(__dirname,'../docs/screenshots');const idx=path.resolve(__dirname,'../index.html');
+const out=path.resolve(__dirname,'../docs/screenshots');const idx=path.resolve(__dirname,'../AW-Lab.html');
 (async()=>{const b=await chromium.launch();const p=await b.newPage({viewport:{width:1440,height:900},deviceScaleFactor:1});const errs=[];p.on('pageerror',e=>errs.push(e.message));
 await p.goto('file://'+idx);await p.waitForTimeout(300);
 const t=async s=>{await p.fill('#cmd',s);await p.press('#cmd','Enter');await p.waitForTimeout(80);};

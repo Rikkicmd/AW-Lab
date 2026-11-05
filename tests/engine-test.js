@@ -22,7 +22,7 @@ const EXPECT = {
   const errs = [];
   p.on('pageerror', e => errs.push('PAGEERR ' + e.message));
   p.on('console', m => { if (m.type() === 'warning' || m.type() === 'error') errs.push(m.type() + ' ' + m.text()); });
-  await p.goto('file://' + path.resolve(__dirname, '../index.html'));
+  await p.goto('file://' + path.resolve(__dirname, '../AW-Lab.html'));
   await p.waitForTimeout(300);
 
   const r = await p.evaluate(() => {
